@@ -1,255 +1,133 @@
-# app/api/smtp_routes.py
+# app/api/email_routes.py
 """
-SMTP密码解密接入API路由
-为外部系统提供SMTP配置和密码解密接口
+邮件发送API路由 - 完整版
+包含邮件发送、附件管理、队列管理、统计等完整功能
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query, Body
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    status,
+    UploadFile,
+    File,
+    Form,
+    Query,
+    BackgroundTasks,
+)
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 from uuid import UUID
 import logging
 from datetime import datetime
+import os
+from pathlib import Path
 
 from ..database import get_db
 from ..services.email_service import EmailService
-from ..utils.security import smtp_password_manager, test_smtp_password_encryption
-from ..schemas.email_schemas import SMTPSettingsCreate, SMTPSettingsResponse
-from pydantic import BaseModel, EmailStr
+from ..schemas.email_schemas import (
+    EmailSendRequest,
+    EmailWithAttachmentsRequest,
+    EmailSendResponse,
+    EmailTestRequest,
+    EmailStatusResponse,
+    BulkEmailRequest,
+    AttachmentUploadResponse,
+    AttachmentDeleteRequest,
+    AttachmentListResponse,
+    EmailStatistics,
+    SMTPSettingsCreate,
+    SMTPSettingsResponse,
+)
+from ..utils.security import file_validator, generate_secure_filename
+from ..config import settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-
-# ==================== 请求/响应模型 ====================
-
-
-class SMTPConfigResponse(BaseModel):
-    """SMTP配置响应（包含解密密码）"""
-
-    id: str
-    tenant_id: str
-    setting_name: str
-    smtp_host: str
-    smtp_port: int
-    smtp_username: str
-    smtp_password: str  # 解密后的明文密码
-    security_protocol: str
-    from_email: str
-    from_name: Optional[str] = None
-    reply_to_email: Optional[str] = None
-    daily_send_limit: int
-    hourly_send_limit: int
-    is_default: bool
-    is_active: bool
-    connection_status: str
-    last_test_at: Optional[str] = None
-    created_at: Optional[str] = None
+# ==================== SMTP设置管理 ====================
 
 
-class SMTPTestRequest(BaseModel):
-    """SMTP连接测试请求"""
-
-    tenant_id: UUID
-    setting_id: UUID
-
-
-class PasswordDecryptRequest(BaseModel):
-    """密码解密请求"""
-
-    encrypted_password: str
-
-
-class PasswordEncryptRequest(BaseModel):
-    """密码加密请求"""
-
-    plain_password: str
-
-
-class SMTPListResponse(BaseModel):
-    """SMTP配置列表响应"""
-
-    total_count: int
-    configs: List[SMTPConfigResponse]
-
-
-# ==================== API 端点 ====================
-
-
-@router.get("/config/{tenant_id}/default", response_model=SMTPConfigResponse)
-def get_default_smtp_config(tenant_id: UUID, db: Session = Depends(get_db)):
-    """
-    获取租户的默认SMTP配置（包含解密密码）
-
-    此接口提供给其他系统使用，返回可直接用于SMTP连接的配置信息
-    """
-    try:
-        email_service = EmailService(db)
-        config_info = email_service.get_smtp_config_info(tenant_id, None)
-
-        if not config_info:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"租户 {tenant_id} 未找到可用的SMTP配置",
-            )
-
-        return SMTPConfigResponse(**config_info)
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"获取默认SMTP配置失败: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取SMTP配置失败: {str(e)}",
-        )
-
-
-@router.get("/config/{tenant_id}/{setting_id}", response_model=SMTPConfigResponse)
-def get_smtp_config_by_id(
-    tenant_id: UUID, setting_id: UUID, db: Session = Depends(get_db)
+@router.post("/smtp-settings", response_model=SMTPSettingsResponse)
+async def create_smtp_settings(
+    smtp_data: SMTPSettingsCreate, db: Session = Depends(get_db)
 ):
-    """
-    根据ID获取特定的SMTP配置（包含解密密码）
-
-    此接口提供给其他系统使用，返回可直接用于SMTP连接的配置信息
-    """
+    """创建SMTP配置"""
     try:
         email_service = EmailService(db)
-        config_info = email_service.get_smtp_config_info(tenant_id, setting_id)
+        smtp_settings = email_service.create_smtp_settings(smtp_data)
 
-        if not config_info:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"未找到SMTP配置 (tenant: {tenant_id}, setting: {setting_id})",
+        return SMTPSettingsResponse(
+            id=smtp_settings.id,
+            tenant_id=smtp_settings.tenant_id,
+            setting_name=smtp_settings.setting_name,
+            smtp_host=smtp_settings.smtp_host,
+            smtp_port=smtp_settings.smtp_port,
+            smtp_username=smtp_settings.smtp_username,
+            security_protocol=smtp_settings.security_protocol,
+            from_email=smtp_settings.from_email,
+            from_name=smtp_settings.from_name,
+            reply_to_email=smtp_settings.reply_to_email,
+            connection_status=smtp_settings.connection_status,
+            is_default=smtp_settings.is_default,
+            is_active=smtp_settings.is_active,
+            created_at=smtp_settings.created_at,
+        )
+
+    except Exception as e:
+        logger.error(f"创建SMTP设置失败: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"创建SMTP设置失败: {str(e)}",
+        )
+
+
+@router.get("/smtp-settings/{tenant_id}", response_model=List[SMTPSettingsResponse])
+async def get_smtp_settings_list(tenant_id: UUID, db: Session = Depends(get_db)):
+    """获取租户的SMTP设置列表"""
+    try:
+        email_service = EmailService(db)
+        settings_list = email_service.get_smtp_settings_list(tenant_id)
+
+        return [
+            SMTPSettingsResponse(
+                id=settings.id,
+                tenant_id=settings.tenant_id,
+                setting_name=settings.setting_name,
+                smtp_host=settings.smtp_host,
+                smtp_port=settings.smtp_port,
+                smtp_username=settings.smtp_username,
+                security_protocol=settings.security_protocol,
+                from_email=settings.from_email,
+                from_name=settings.from_name,
+                reply_to_email=settings.reply_to_email,
+                connection_status=settings.connection_status,
+                is_default=settings.is_default,
+                is_active=settings.is_active,
+                created_at=settings.created_at,
             )
-
-        return SMTPConfigResponse(**config_info)
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"获取SMTP配置失败: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取SMTP配置失败: {str(e)}",
-        )
-
-
-@router.get("/configs/{tenant_id}", response_model=SMTPListResponse)
-def get_smtp_configs_list(
-    tenant_id: UUID,
-    include_password: bool = Query(False, description="是否包含解密后的密码"),
-    db: Session = Depends(get_db),
-):
-    """
-    获取租户的所有SMTP配置列表
-
-    Args:
-        tenant_id: 租户ID
-        include_password: 是否包含解密后的密码（默认不包含，出于安全考虑）
-    """
-    try:
-        email_service = EmailService(db)
-        smtp_settings_list = email_service.get_smtp_settings_list(tenant_id)
-
-        configs = []
-        for settings in smtp_settings_list:
-            if include_password:
-                # 包含解密密码
-                config_info = email_service.get_smtp_config_info(tenant_id, settings.id)
-                if config_info:
-                    configs.append(SMTPConfigResponse(**config_info))
-            else:
-                # 不包含密码
-                config_data = {
-                    "id": str(settings.id),
-                    "tenant_id": str(settings.tenant_id),
-                    "setting_name": settings.setting_name,
-                    "smtp_host": settings.smtp_host,
-                    "smtp_port": settings.smtp_port,
-                    "smtp_username": settings.smtp_username,
-                    "smtp_password": "***",  # 隐藏密码
-                    "security_protocol": settings.security_protocol,
-                    "from_email": settings.from_email,
-                    "from_name": settings.from_name,
-                    "reply_to_email": settings.reply_to_email,
-                    "daily_send_limit": settings.daily_send_limit,
-                    "hourly_send_limit": settings.hourly_send_limit,
-                    "is_default": settings.is_default,
-                    "is_active": settings.is_active,
-                    "connection_status": settings.connection_status,
-                    "last_test_at": (
-                        settings.last_test_at.isoformat()
-                        if settings.last_test_at
-                        else None
-                    ),
-                    "created_at": (
-                        settings.created_at.isoformat() if settings.created_at else None
-                    ),
-                }
-                configs.append(SMTPConfigResponse(**config_data))
-
-        return SMTPListResponse(total_count=len(configs), configs=configs)
+            for settings in settings_list
+        ]
 
     except Exception as e:
-        logger.error(f"获取SMTP配置列表失败: {str(e)}")
+        logger.error(f"获取SMTP设置列表失败: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取SMTP配置列表失败: {str(e)}",
+            detail=f"获取SMTP设置失败: {str(e)}",
         )
 
 
-@router.post("/config", response_model=SMTPConfigResponse)
-def create_smtp_config(config_data: SMTPSettingsCreate, db: Session = Depends(get_db)):
-    """
-    创建新的SMTP配置
-
-    此接口会自动加密密码并存储，返回包含解密密码的配置信息
-    """
-    try:
-        email_service = EmailService(db)
-        smtp_settings = email_service.create_smtp_settings(config_data)
-
-        # 返回包含解密密码的配置信息
-        config_info = email_service.get_smtp_config_info(
-            config_data.tenant_id, smtp_settings.id
-        )
-
-        if not config_info:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="配置创建成功但获取配置信息失败",
-            )
-
-        return SMTPConfigResponse(**config_info)
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"创建SMTP配置失败: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"创建SMTP配置失败: {str(e)}",
-        )
-
-
-@router.post("/test")
+@router.post("/smtp-settings/test")
 async def test_smtp_connection(
-    test_request: SMTPTestRequest, db: Session = Depends(get_db)
+    test_request: EmailTestRequest, db: Session = Depends(get_db)
 ):
-    """
-    测试SMTP连接
-
-    此接口会使用解密后的密码测试SMTP连接
-    """
+    """测试SMTP连接"""
     try:
         email_service = EmailService(db)
         result = await email_service.test_smtp_connection(
-            test_request.tenant_id, test_request.setting_id
+            test_request.tenant_id, test_request.smtp_setting_id
         )
-
         return result
 
     except Exception as e:
@@ -260,113 +138,572 @@ async def test_smtp_connection(
         )
 
 
-# ==================== 密码加密解密工具接口 ====================
+# ==================== 附件管理 ====================
 
 
-@router.post("/password/decrypt")
-def decrypt_password(request: PasswordDecryptRequest):
-    """
-    解密SMTP密码（工具接口）
-
-    此接口仅用于调试和工具使用，生产环境应谨慎使用
-    """
+@router.post("/attachments/upload", response_model=AttachmentUploadResponse)
+async def upload_attachment(
+    tenant_id: UUID = Form(...),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    """上传单个附件"""
     try:
-        decrypted = smtp_password_manager.decrypt(request.encrypted_password)
-        return {
-            "status": "success",
-            "decrypted_password": decrypted,
-            "message": "密码解密成功",
-        }
-    except Exception as e:
-        logger.error(f"密码解密失败: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=f"密码解密失败: {str(e)}"
+        # 验证文件大小
+        file_content = await file.read()
+        if len(file_content) > settings.MAX_FILE_SIZE:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"文件过大，最大允许{settings.MAX_FILE_SIZE/1024/1024:.1f}MB",
+            )
+
+        # 验证文件
+        validation_result = file_validator.validate_file(
+            file_content, file.filename, file.content_type
         )
 
+        if not validation_result["valid"]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"文件验证失败: {', '.join(validation_result['errors'])}",
+            )
 
-@router.post("/password/encrypt")
-def encrypt_password(request: PasswordEncryptRequest):
-    """
-    加密SMTP密码（工具接口）
-
-    此接口用于生成加密后的密码，可用于直接插入数据库
-    """
-    try:
-        encrypted = smtp_password_manager.encrypt(request.plain_password)
-        return {
-            "status": "success",
-            "encrypted_password": encrypted,
-            "message": "密码加密成功",
-        }
-    except Exception as e:
-        logger.error(f"密码加密失败: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=f"密码加密失败: {str(e)}"
+        # 保存附件
+        email_service = EmailService(db)
+        attachment_info, attachment_id = email_service.save_attachment(
+            file_content, file.filename, tenant_id, file.content_type
         )
 
+        return AttachmentUploadResponse(
+            attachment_id=attachment_id,
+            filename=attachment_info.filename,
+            content_type=attachment_info.content_type,
+            file_size=attachment_info.file_size,
+            status="uploaded",
+            message="附件上传成功",
+        )
 
-@router.get("/password/test")
-def test_password_encryption():
-    """
-    测试密码加密解密功能
-
-    此接口用于验证加密解密功能是否正常工作
-    """
-    try:
-        test_result = test_smtp_password_encryption()
-        return test_result
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"密码加密测试失败: {str(e)}")
+        logger.error(f"上传附件失败: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"密码加密测试失败: {str(e)}",
+            detail=f"上传附件失败: {str(e)}",
         )
 
 
-# ==================== 系统信息接口 ====================
+@router.post(
+    "/attachments/upload-multiple", response_model=List[AttachmentUploadResponse]
+)
+async def upload_multiple_attachments(
+    tenant_id: UUID = Form(...),
+    files: List[UploadFile] = File(...),
+    db: Session = Depends(get_db),
+):
+    """批量上传附件"""
+    try:
+        if len(files) > settings.MAX_FILES_PER_REQUEST:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"文件数量超过限制，最大{settings.MAX_FILES_PER_REQUEST}个",
+            )
+
+        results = []
+        total_size = 0
+
+        for file in files:
+            file_content = await file.read()
+            total_size += len(file_content)
+
+            # 检查总大小
+            if total_size > settings.MAX_TOTAL_REQUEST_SIZE:
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail=f"总文件大小超过限制，最大{settings.MAX_TOTAL_REQUEST_SIZE/1024/1024:.1f}MB",
+                )
+
+            try:
+                # 验证单个文件
+                validation_result = file_validator.validate_file(
+                    file_content, file.filename, file.content_type
+                )
+
+                if not validation_result["valid"]:
+                    results.append(
+                        AttachmentUploadResponse(
+                            attachment_id=UUID("00000000-0000-0000-0000-000000000000"),
+                            filename=file.filename,
+                            content_type=file.content_type or "unknown",
+                            file_size=len(file_content),
+                            status="failed",
+                            message=f"验证失败: {', '.join(validation_result['errors'])}",
+                        )
+                    )
+                    continue
+
+                # 保存附件
+                email_service = EmailService(db)
+                attachment_info, attachment_id = email_service.save_attachment(
+                    file_content, file.filename, tenant_id, file.content_type
+                )
+
+                results.append(
+                    AttachmentUploadResponse(
+                        attachment_id=attachment_id,
+                        filename=attachment_info.filename,
+                        content_type=attachment_info.content_type,
+                        file_size=attachment_info.file_size,
+                        status="uploaded",
+                        message="上传成功",
+                    )
+                )
+
+            except Exception as e:
+                logger.error(f"上传文件 {file.filename} 失败: {str(e)}")
+                results.append(
+                    AttachmentUploadResponse(
+                        attachment_id=UUID("00000000-0000-0000-0000-000000000000"),
+                        filename=file.filename,
+                        content_type=file.content_type or "unknown",
+                        file_size=len(file_content),
+                        status="failed",
+                        message=f"上传失败: {str(e)}",
+                    )
+                )
+
+        return results
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"批量上传附件失败: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"批量上传失败: {str(e)}",
+        )
+
+
+@router.delete("/attachments/{tenant_id}/{attachment_id}")
+async def delete_attachment(
+    tenant_id: UUID,
+    attachment_id: UUID,
+    filename: str = Query(..., description="文件名"),
+    db: Session = Depends(get_db),
+):
+    """删除附件"""
+    try:
+        email_service = EmailService(db)
+        success = email_service.delete_attachment(tenant_id, attachment_id, filename)
+
+        if success:
+            return {"status": "success", "message": "附件删除成功"}
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="附件不存在或已被删除"
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"删除附件失败: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"删除附件失败: {str(e)}",
+        )
+
+
+@router.get("/attachments/{tenant_id}", response_model=AttachmentListResponse)
+async def get_attachments_list(tenant_id: UUID, db: Session = Depends(get_db)):
+    """获取租户的附件列表"""
+    try:
+        email_service = EmailService(db)
+        storage_usage = email_service.attachment_manager.get_tenant_storage_usage(
+            tenant_id
+        )
+
+        attachments = []
+        for file_info in storage_usage.get("files", []):
+            attachments.append(
+                {
+                    "filename": file_info["name"],
+                    "content_type": "application/octet-stream",  # 默认类型
+                    "file_size": file_info["size"],
+                }
+            )
+
+        return AttachmentListResponse(
+            attachments=attachments,
+            total_count=storage_usage["file_count"],
+            total_size=storage_usage["total_size"],
+        )
+
+    except Exception as e:
+        logger.error(f"获取附件列表失败: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取附件列表失败: {str(e)}",
+        )
+
+
+# ==================== 邮件发送 ====================
+
+
+@router.post("/send", response_model=EmailSendResponse)
+async def send_email(
+    email_request: EmailSendRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """发送普通邮件"""
+    try:
+        email_service = EmailService(db)
+        result = await email_service.send_email_immediately(email_request)
+
+        return EmailSendResponse(
+            queue_id=result["queue_id"],
+            status=result["status"],
+            message=result["message"],
+            to_emails=result["to_emails"],
+            scheduled_at=result.get("scheduled_at"),
+            attachments_count=result.get("attachment_count", 0),
+        )
+
+    except Exception as e:
+        logger.error(f"发送邮件失败: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"发送邮件失败: {str(e)}",
+        )
+
+
+@router.post("/send-with-attachments", response_model=EmailSendResponse)
+async def send_email_with_attachments(
+    email_request: EmailWithAttachmentsRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """发送带附件的邮件"""
+    try:
+        email_service = EmailService(db)
+        result = await email_service.send_email_with_attachments(email_request)
+
+        return EmailSendResponse(
+            queue_id=result["queue_id"],
+            status=result["status"],
+            message=result["message"],
+            to_emails=result["to_emails"],
+            scheduled_at=result.get("scheduled_at"),
+            attachments_count=result.get("attachment_count", 0),
+        )
+
+    except Exception as e:
+        logger.error(f"发送带附件邮件失败: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"发送邮件失败: {str(e)}",
+        )
+
+
+@router.post("/send-bulk")
+async def send_bulk_emails(
+    bulk_request: BulkEmailRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """批量发送邮件"""
+    try:
+        email_service = EmailService(db)
+        result = await email_service.send_bulk_emails(bulk_request)
+
+        return {
+            "status": result["status"],
+            "total_emails": result["total_emails"],
+            "successful_sends": result["successful_sends"],
+            "failed_sends": result["failed_sends"],
+            "success_rate": result["success_rate"],
+            "message": f"批量发送完成，成功{result['successful_sends']}封，失败{result['failed_sends']}封",
+        }
+
+    except Exception as e:
+        logger.error(f"批量发送邮件失败: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"批量发送失败: {str(e)}",
+        )
+
+
+@router.post("/send-test")
+async def send_test_email(
+    test_request: EmailTestRequest, db: Session = Depends(get_db)
+):
+    """发送测试邮件"""
+    try:
+        email_service = EmailService(db)
+        result = await email_service.send_test_email(
+            test_request.tenant_id,
+            test_request.smtp_setting_id,
+            test_request.test_email,
+        )
+
+        return result
+
+    except Exception as e:
+        logger.error(f"发送测试邮件失败: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"发送测试邮件失败: {str(e)}",
+        )
+
+
+# ==================== 队列管理 ====================
+
+
+@router.get("/queue/{tenant_id}/{queue_id}", response_model=EmailStatusResponse)
+async def get_email_status(
+    tenant_id: UUID, queue_id: UUID, db: Session = Depends(get_db)
+):
+    """获取邮件发送状态"""
+    try:
+        email_service = EmailService(db)
+        queue_item = email_service.get_email_queue_status(tenant_id, queue_id)
+
+        if not queue_item:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="邮件记录不存在"
+            )
+
+        # 解析附件信息
+        attachments_info = []
+        if queue_item.attachments and isinstance(queue_item.attachments, dict):
+            attachments_data = queue_item.attachments.get("attachments", [])
+            for att in attachments_data:
+                attachments_info.append(
+                    {
+                        "filename": att.get("filename", ""),
+                        "content_type": att.get("content_type", ""),
+                        "file_size": att.get("file_size", 0),
+                    }
+                )
+
+        return EmailStatusResponse(
+            id=queue_item.id,
+            to_emails=queue_item.to_emails,
+            subject=queue_item.subject,
+            status=queue_item.status,
+            created_at=queue_item.created_at,
+            sent_at=queue_item.sent_at,
+            error_message=queue_item.error_message,
+            attachments_info=attachments_info,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取邮件状态失败: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取邮件状态失败: {str(e)}",
+        )
+
+
+@router.get("/queue/{tenant_id}")
+async def get_email_queue_list(
+    tenant_id: UUID,
+    limit: int = Query(50, ge=1, le=100, description="每页数量"),
+    offset: int = Query(0, ge=0, description="偏移量"),
+    db: Session = Depends(get_db),
+):
+    """获取邮件队列列表"""
+    try:
+        email_service = EmailService(db)
+        queue_list = email_service.get_email_queue_list(tenant_id, limit, offset)
+
+        result = []
+        for item in queue_list:
+            # 解析附件信息
+            attachment_count = 0
+            if item.attachments and isinstance(item.attachments, dict):
+                attachment_count = item.attachments.get("attachment_count", 0)
+
+            result.append(
+                {
+                    "id": item.id,
+                    "to_emails": item.to_emails,
+                    "subject": item.subject,
+                    "status": item.status,
+                    "priority": item.priority,
+                    "created_at": (
+                        item.created_at.isoformat() if item.created_at else None
+                    ),
+                    "sent_at": item.sent_at.isoformat() if item.sent_at else None,
+                    "scheduled_at": (
+                        item.scheduled_at.isoformat() if item.scheduled_at else None
+                    ),
+                    "attachment_count": attachment_count,
+                    "send_duration_ms": item.send_duration_ms,
+                    "error_message": item.error_message,
+                    "retry_count": item.current_retry_count,
+                }
+            )
+
+        return {
+            "items": result,
+            "total_count": len(result),
+            "limit": limit,
+            "offset": offset,
+            "has_more": len(result) == limit,
+        }
+
+    except Exception as e:
+        logger.error(f"获取邮件队列列表失败: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取邮件队列失败: {str(e)}",
+        )
+
+
+# ==================== 统计分析 ====================
+
+
+@router.get("/statistics/{tenant_id}", response_model=EmailStatistics)
+async def get_email_statistics(
+    tenant_id: UUID,
+    days: int = Query(30, ge=1, le=365, description="统计天数"),
+    db: Session = Depends(get_db),
+):
+    """获取邮件发送统计"""
+    try:
+        email_service = EmailService(db)
+        stats = email_service.get_email_statistics(tenant_id, days)
+
+        return EmailStatistics(
+            total_sent=stats["total_sent"],
+            total_failed=stats["total_failed"],
+            total_pending=stats["total_pending"],
+            success_rate=stats["success_rate"],
+            total_attachments=stats["total_attachments"],
+            total_attachment_size=stats["total_attachment_size"],
+            avg_send_time=(
+                stats.get("avg_send_time_ms", 0) / 1000
+                if stats.get("avg_send_time_ms")
+                else None
+            ),
+        )
+
+    except Exception as e:
+        logger.error(f"获取邮件统计失败: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取统计数据失败: {str(e)}",
+        )
+
+
+# ==================== 维护和管理 ====================
+
+
+@router.post("/maintenance/cleanup-attachments/{tenant_id}")
+async def cleanup_tenant_attachments(
+    tenant_id: UUID,
+    days: int = Query(7, ge=1, le=365, description="清理多少天前的文件"),
+    db: Session = Depends(get_db),
+):
+    """清理租户的过期附件"""
+    try:
+        email_service = EmailService(db)
+        cleanup_count = email_service.cleanup_old_attachments(tenant_id, days)
+
+        return {
+            "status": "success",
+            "message": f"清理完成，删除了{cleanup_count}个过期附件",
+            "cleanup_count": cleanup_count,
+            "days": days,
+        }
+
+    except Exception as e:
+        logger.error(f"清理附件失败: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"清理附件失败: {str(e)}",
+        )
+
+
+@router.get("/maintenance/storage-usage/{tenant_id}")
+async def get_storage_usage(tenant_id: UUID, db: Session = Depends(get_db)):
+    """获取存储使用情况"""
+    try:
+        email_service = EmailService(db)
+        usage = email_service.attachment_manager.get_tenant_storage_usage(tenant_id)
+
+        return {
+            "tenant_id": str(tenant_id),
+            "total_size": usage["total_size"],
+            "total_size_mb": round(usage["total_size"] / 1024 / 1024, 2),
+            "file_count": usage["file_count"],
+            "files": usage["files"][:20],  # 只返回前20个文件信息
+            "storage_path": usage.get("storage_path", ""),
+        }
+
+    except Exception as e:
+        logger.error(f"获取存储使用情况失败: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取存储信息失败: {str(e)}",
+        )
+
+
+# ==================== 系统信息 ====================
 
 
 @router.get("/system/info")
-def get_system_info():
-    """
-    获取系统信息
+async def get_system_info():
+    """获取系统信息"""
+    return {
+        "service": "邮件发送API",
+        "version": "2.0.0",
+        "supported_features": [
+            "SMTP配置管理",
+            "单发邮件",
+            "群发邮件",
+            "附件支持",
+            "邮件队列",
+            "状态跟踪",
+            "统计分析",
+        ],
+        "limits": {
+            "max_file_size_mb": settings.MAX_FILE_SIZE / 1024 / 1024,
+            "max_files_per_request": settings.MAX_FILES_PER_REQUEST,
+            "max_recipients_per_email": settings.MAX_RECIPIENTS_PER_EMAIL,
+            "max_bulk_emails": settings.MAX_BULK_EMAILS,
+        },
+        "supported_file_types": {
+            "documents": [".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx"],
+            "images": [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".svg"],
+            "archives": [".zip", ".rar", ".7z"],
+            "others": [".txt", ".csv", ".json", ".xml"],
+        },
+    }
 
-    包含加密密钥信息和系统状态
-    """
+
+@router.get("/system/health")
+async def health_check(db: Session = Depends(get_db)):
+    """健康检查"""
     try:
-        key_info = smtp_password_manager.get_key_info()
-        return {
-            "status": "active",
-            "encryption_info": key_info,
-            "supported_protocols": ["TLS", "SSL", "None"],
-            "api_version": "v1",
-            "timestamp": datetime.utcnow().isoformat(),
-        }
-    except Exception as e:
-        logger.error(f"获取系统信息失败: {str(e)}")
-        return {
-            "status": "error",
-            "error": str(e),
-            "timestamp": datetime.utcnow().isoformat(),
-        }
+        # 测试数据库连接
+        db.execute("SELECT 1")
 
-
-@router.get("/health")
-def health_check():
-    """
-    健康检查接口
-
-    检查SMTP密码解密功能是否正常
-    """
-    try:
-        # 测试加密解密功能
-        test_result = smtp_password_manager.test_encryption()
+        # 检查上传目录
+        upload_dir = Path(settings.ATTACHMENT_DIR)
+        upload_accessible = upload_dir.exists() and os.access(upload_dir, os.W_OK)
 
         return {
-            "status": "healthy" if test_result else "unhealthy",
-            "encryption_test": test_result,
+            "status": "healthy",
             "timestamp": datetime.utcnow().isoformat(),
+            "database": "connected",
+            "storage": "accessible" if upload_accessible else "error",
+            "upload_directory": str(upload_dir),
         }
+
     except Exception as e:
         logger.error(f"健康检查失败: {str(e)}")
         return JSONResponse(
@@ -377,89 +714,3 @@ def health_check():
                 "timestamp": datetime.utcnow().isoformat(),
             },
         )
-
-
-# ==================== 使用说明接口 ====================
-
-
-@router.get("/usage/guide")
-def get_usage_guide():
-    """
-    获取使用指南
-
-    提供API使用说明和示例
-    """
-    return {
-        "title": "SMTP密码解密接入API使用指南",
-        "version": "v1.0",
-        "base_url": "/api/v1/smtp",
-        "endpoints": {
-            "get_default_config": {
-                "url": "GET /config/{tenant_id}/default",
-                "description": "获取租户默认SMTP配置（含解密密码）",
-                "example": "GET /config/33723dd6-cf28-4dab-975c-f883f5389d04/default",
-            },
-            "get_config_by_id": {
-                "url": "GET /config/{tenant_id}/{setting_id}",
-                "description": "获取特定SMTP配置（含解密密码）",
-                "example": "GET /config/33723dd6-cf28-4dab-975c-f883f5389d04/12345678-1234-1234-1234-123456789abc",
-            },
-            "list_configs": {
-                "url": "GET /configs/{tenant_id}?include_password=true",
-                "description": "获取所有SMTP配置列表",
-                "example": "GET /configs/33723dd6-cf28-4dab-975c-f883f5389d04?include_password=true",
-            },
-            "test_connection": {
-                "url": "POST /test",
-                "description": "测试SMTP连接",
-                "body": {
-                    "tenant_id": "33723dd6-cf28-4dab-975c-f883f5389d04",
-                    "setting_id": "12345678-1234-1234-1234-123456789abc",
-                },
-            },
-        },
-        "authentication": {
-            "type": "API Key",
-            "header": "Authorization: Bearer your-api-key",
-            "note": "生产环境需要配置适当的认证机制",
-        },
-        "response_format": {
-            "success": {"status": "success", "data": "响应数据"},
-            "error": {"detail": "错误描述", "status_code": "HTTP状态码"},
-        },
-        "important_notes": [
-            "所有密码都使用Fernet加密算法加密存储",
-            "返回的明文密码仅用于SMTP连接，请妥善保护",
-            "建议在网络层面限制API访问权限",
-            "定期更换加密密钥以提高安全性",
-        ],
-    }
-
-
-# ==================== 错误处理 ====================
-
-
-@router.get("/errors/codes")
-def get_error_codes():
-    """
-    获取错误代码说明
-    """
-    return {
-        "error_codes": {
-            "404": "资源不存在 - SMTP配置未找到",
-            "400": "请求参数错误 - 检查输入数据格式",
-            "500": "服务器内部错误 - 检查服务器日志",
-            "503": "服务不可用 - 检查加密密钥配置",
-        },
-        "common_issues": {
-            "encryption_key_missing": "ENCRYPTION_KEY环境变量未设置",
-            "encryption_key_invalid": "加密密钥格式错误或损坏",
-            "database_connection_failed": "数据库连接失败",
-            "smtp_config_not_found": "SMTP配置不存在或已删除",
-        },
-        "troubleshooting": {
-            "check_logs": "查看应用日志文件获取详细错误信息",
-            "verify_keys": "使用 /smtp/password/test 验证加密功能",
-            "health_check": "使用 /smtp/health 检查系统状态",
-        },
-    }
