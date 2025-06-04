@@ -1,0 +1,188 @@
+# ==========================================
+# 邮件API系统 Docker Compose 配置 - 简化版
+# 不包含Redis和可选服务
+# ==========================================
+
+version: '3.8'
+
+# ==========================================
+# 网络配置
+# ==========================================
+networks:
+  email_api_network:
+    driver: bridge
+
+# ==========================================
+# 数据卷配置
+# ==========================================
+volumes:
+  postgres_data:
+    driver: local
+  email_uploads:
+    driver: local
+  email_logs:
+    driver: local
+
+# ==========================================
+# 核心服务配置
+# ==========================================
+services:
+
+  # ==========================================
+  # 主应用服务
+  # ==========================================
+  email-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: email_api_app
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # 数据库配置
+      - DATABASE_URL=postgresql://emailapi:emailapi123@db:5432/email_api_db
+
+      # 安全配置
+      - SECRET_KEY=your-super-secret-key-change-this-in-production
+      - ENCRYPTION_KEY=your-fernet-encryption-key-change-this
+
+      # 应用配置
+      - PROJECT_NAME=Email API
+      - API_V1_STR=/api/v1
+      - ENVIRONMENT=production
+      - DEBUG=false
+
+      # 文件上传配置
+      - UPLOAD_DIR=/app/uploads
+      - ATTACHMENT_DIR=/app/uploads/attachments
+      - TEMP_DIR=/app/uploads/temp
+      - MAX_FILE_SIZE=26214400 # 25MB
+      - MAX_FILES_PER_REQUEST=10
+
+      # 邮件配置
+      - MAX_RECIPIENTS_PER_EMAIL=100
+      - MAX_BULK_EMAILS=1000
+      - EMAIL_TIMEOUT_SECONDS=60
+
+      # 日志配置
+      - LOG_LEVEL=INFO
+      - LOG_FILE=/app/logs/app.log
+
+      # CORS配置
+      - BACKEND_CORS_ORIGINS=["http://localhost:3000","http://localhost:8080"]
+
+      # 禁用Redis相关功能
+      - REDIS_ENABLED=false
+      - CACHE_ENABLED=false
+
+    volumes:
+      - email_uploads:/app/uploads
+      - email_logs:/app/logs
+
+    depends_on:
+      db:
+        condition: service_healthy
+
+    networks:
+      - email_api_network
+
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+
+  # ==========================================
+  # PostgreSQL 数据库
+  # ==========================================
+  db:
+    image: postgres:15-alpine
+    container_name: email_api_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: email_api_db
+      POSTGRES_USER: emailapi
+      POSTGRES_PASSWORD: emailapi123
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8"
+      TZ: Asia/Tokyo
+      PGTZ: Asia/Tokyo
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+    ports:
+      - "5432:5432"
+
+    networks:
+      - email_api_network
+
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U emailapi -d email_api_db" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+
+  # ==========================================
+  # pgAdmin（可选 - 数据库管理）
+  # ==========================================
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: email_api_pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@email-api.com
+      PGADMIN_DEFAULT_PASSWORD: admin123
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+
+    ports:
+      - "5050:80"
+
+    depends_on:
+      - db
+
+    networks:
+      - email_api_network
+
+    profiles:
+      - admin
+
+# ==========================================
+# 使用说明
+# ==========================================
+
+# 基本启动：
+# docker-compose up -d
+
+# 包含数据库管理工具：
+# docker-compose --profile admin up -d
+
+# 查看日志：
+# docker-compose logs -f email-api
+
+# 停止服务：
+# docker-compose down
+
+# 数据备份：
+# docker-compose exec db pg_dump -U emailapi email_api_db > backup.sql

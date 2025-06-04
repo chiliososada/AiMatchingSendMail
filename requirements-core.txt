@@ -1,0 +1,42 @@
+# ==========================================
+# 邮件API系统 - 纯核心依赖
+# 只包含运行必需的包，最大程度避免冲突
+# ==========================================
+
+# 核心框架
+fastapi>=0.104.1
+"uvicorn[standard]">=0.24.0
+
+# 数据库
+sqlalchemy>=2.0.23
+psycopg2-binary>=2.9.7
+
+# 数据验证
+pydantic>=2.5.0
+pydantic-settings>=2.0.3
+
+# 安全
+cryptography>=41.0.7
+"passlib[bcrypt]">=1.7.4
+
+# 配置
+python-dotenv>=1.0.0
+
+# 邮件发送
+aiosmtplib>=3.0.1
+email-validator>=2.1.0
+
+# 文件上传
+python-multipart>=0.0.6
+
+# 模板
+jinja2>=3.1.2
+
+# 基础工具
+python-dateutil>=2.8.2
+pytz>=2023.3
+
+# ==========================================
+# 安装命令
+# ==========================================
+# pip install -r requirements-core.txt
