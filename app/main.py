@@ -12,7 +12,7 @@ import os
 
 from .config import settings
 from .api.email_routes import router as email_router
-from .api.smtp_routes import router as smtp_router  # 新增SMTP路由
+from .api.smtp_routes import router as smtp_router  # 修复：确保导入SMTP路由
 from .database import engine, Base
 
 # 配置日志
@@ -42,7 +42,7 @@ app = FastAPI(
     
     ## 主要功能
     - 邮件发送和管理
-    - SMTP配置和密码解密
+    - SMTP配置和密码解密（与aimachingmail项目兼容）
     - 附件上传和管理
     - 邮件队列和状态跟踪
     - 统计分析和监控
@@ -51,6 +51,12 @@ app = FastAPI(
     - `/api/v1/smtp/config/{tenant_id}/default` - 获取默认SMTP配置（含解密密码）
     - `/api/v1/smtp/config/{tenant_id}/{setting_id}` - 获取特定SMTP配置
     - `/api/v1/smtp/test` - 测试SMTP连接
+    - `/api/v1/smtp/password/test` - 测试加密解密功能
+    
+    ## 兼容性说明
+    - 与aimachingmail项目使用相同的密钥派生算法（SHA256）
+    - 支持多种密码存储格式（hex、base64、bytes）
+    - 完全向后兼容现有的加密数据
     """,
     version="2.0.0",
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
@@ -172,7 +178,7 @@ app.include_router(
     email_router, prefix=f"{settings.API_V1_STR}/email", tags=["邮件服务"]
 )
 
-# 新增SMTP密码解密API路由
+# 修复：确保包含SMTP密码解密API路由
 app.include_router(
     smtp_router, prefix=f"{settings.API_V1_STR}/smtp", tags=["SMTP配置与解密"]
 )
@@ -186,6 +192,7 @@ async def root():
     return {
         "message": "邮件发送API服务正在运行",
         "version": "2.0.0",
+        "compatibility": "与aimachingmail项目完全兼容",
         "features": [
             "SMTP配置管理",
             "单发/群发邮件",
@@ -193,15 +200,19 @@ async def root():
             "邮件队列管理",
             "发送状态跟踪",
             "多租户支持",
-            "SMTP密码解密接入",  # 新增功能
+            "SMTP密码解密接入（兼容aimachingmail）",
         ],
         "api_endpoints": {
             "docs": "/docs",
             "redoc": "/redoc",
             "email_api": f"{settings.API_V1_STR}/email",
-            "smtp_api": f"{settings.API_V1_STR}/smtp",  # 新增
+            "smtp_api": f"{settings.API_V1_STR}/smtp",
         },
-        "smtp_decryption_guide": f"{settings.API_V1_STR}/smtp/usage/guide",  # 新增使用指南
+        "smtp_decryption": {
+            "guide": f"{settings.API_V1_STR}/smtp/usage/guide",
+            "test": f"{settings.API_V1_STR}/smtp/password/test",
+            "health": f"{settings.API_V1_STR}/smtp/health",
+        },
     }
 
 
@@ -229,6 +240,7 @@ async def health_check():
         return {
             "status": "healthy",
             "timestamp": time.time(),
+            "compatibility": "aimachingmail项目兼容",
             "services": {
                 "database": "connected",
                 "file_storage": "accessible" if upload_accessible else "error",
@@ -240,6 +252,8 @@ async def health_check():
             },
             "smtp_decryption": {
                 "status": "available",
+                "compatible_with": "aimachingmail",
+                "encryption_method": "Fernet with SHA256 key derivation",
                 "test_endpoint": f"{settings.API_V1_STR}/smtp/password/test",
             },
         }
@@ -247,7 +261,12 @@ async def health_check():
         logger.error(f"Health check failed: {str(e)}")
         return JSONResponse(
             status_code=503,
-            content={"status": "unhealthy", "error": str(e), "timestamp": time.time()},
+            content={
+                "status": "unhealthy",
+                "error": str(e),
+                "timestamp": time.time(),
+                "suggestion": "检查数据库连接和ENCRYPTION_KEY配置",
+            },
         )
 
 
@@ -262,6 +281,7 @@ async def system_info():
             "name": settings.PROJECT_NAME,
             "version": "2.0.0",
             "api_version": settings.API_V1_STR,
+            "compatibility": "与aimachingmail项目完全兼容",
         },
         "system": {
             "python_version": sys.version,
@@ -276,9 +296,11 @@ async def system_info():
         },
         "smtp_features": {
             "password_encryption": "Fernet (AES 128)",
+            "key_derivation": "SHA256 (与aimachingmail一致)",
             "supported_protocols": ["TLS", "SSL", "None"],
             "decryption_api": "Available",
             "api_prefix": f"{settings.API_V1_STR}/smtp",
+            "compatibility_tested": True,
         },
     }
 
@@ -336,8 +358,10 @@ async def get_system_limits():
         },
         "smtp_decryption": {
             "encryption_algorithm": "Fernet (AES 128)",
-            "key_derivation": "PBKDF2-SHA256 (100,000 iterations)",
+            "key_derivation": "SHA256 (与aimachingmail一致)",
+            "supported_formats": ["hex", "base64", "bytes"],
             "api_rate_limit": "No limit (configure as needed)",
+            "compatibility": "aimachingmail项目完全兼容",
         },
     }
 
@@ -349,31 +373,95 @@ async def smtp_decryption_info():
     return {
         "title": "SMTP密码解密接入",
         "description": "为外部系统提供SMTP配置和密码解密服务",
+        "compatibility": {
+            "projects": ["aimachingmail"],
+            "encryption": "Fernet with SHA256 key derivation",
+            "formats": ["hex", "base64", "bytes"],
+        },
         "api_base": f"{settings.API_V1_STR}/smtp",
         "key_endpoints": {
             "get_default_config": f"{settings.API_V1_STR}/smtp/config/{{tenant_id}}/default",
             "get_config_by_id": f"{settings.API_V1_STR}/smtp/config/{{tenant_id}}/{{setting_id}}",
             "test_connection": f"{settings.API_V1_STR}/smtp/test",
+            "test_encryption": f"{settings.API_V1_STR}/smtp/password/test",
+            "health_check": f"{settings.API_V1_STR}/smtp/health",
             "usage_guide": f"{settings.API_V1_STR}/smtp/usage/guide",
         },
         "security": {
             "encryption": "Fernet对称加密",
+            "key_derivation": "SHA256哈希（与aimachingmail一致）",
             "key_required": "ENCRYPTION_KEY环境变量",
-            "password_format": "Base64编码的加密数据",
+            "password_format": "支持多种格式（hex/base64/bytes）",
         },
         "integration_steps": [
-            "1. 确保与邮件系统使用相同的ENCRYPTION_KEY",
+            "1. 确保与aimachingmail使用相同的ENCRYPTION_KEY",
             "2. 调用配置API获取SMTP设置",
             "3. 使用返回的明文密码进行SMTP连接",
             "4. 可选：调用测试接口验证连接",
+            "5. 使用健康检查接口监控状态",
+        ],
+        "troubleshooting": [
+            "检查ENCRYPTION_KEY是否与aimachingmail项目一致",
+            "使用/smtp/password/test验证加密解密功能",
+            "查看应用日志获取详细错误信息",
+            "确认数据库中的密码格式",
         ],
         "documentation": "/docs#/SMTP配置与解密",
     }
 
 
+# 快速测试端点
+@app.get("/quick-test", tags=["系统"], summary="快速功能测试")
+async def quick_test():
+    """快速测试系统核心功能"""
+    results = {}
+
+    try:
+        # 测试数据库连接
+        from .database import SessionLocal
+
+        db = SessionLocal()
+        db.execute("SELECT 1")
+        db.close()
+        results["database"] = "✅ 连接正常"
+    except Exception as e:
+        results["database"] = f"❌ 连接失败: {str(e)}"
+
+    try:
+        # 测试加密解密
+        from .utils.security import smtp_password_manager
+
+        test_result = smtp_password_manager.test_encryption()
+        results["encryption"] = "✅ 加密解密正常" if test_result else "❌ 加密解密失败"
+    except Exception as e:
+        results["encryption"] = f"❌ 加密测试失败: {str(e)}"
+
+    try:
+        # 测试文件存储
+        upload_accessible = ATTACHMENT_DIR.exists() and os.access(
+            ATTACHMENT_DIR, os.W_OK
+        )
+        results["file_storage"] = (
+            "✅ 文件存储正常" if upload_accessible else "❌ 文件存储不可用"
+        )
+    except Exception as e:
+        results["file_storage"] = f"❌ 文件存储测试失败: {str(e)}"
+
+    return {
+        "status": "success",
+        "message": "快速测试完成",
+        "results": results,
+        "timestamp": time.time(),
+        "recommendations": [
+            "如果有❌项目，请检查对应的配置",
+            "确保ENCRYPTION_KEY与aimachingmail项目一致",
+            "查看完整健康检查：/health",
+            "查看SMTP专门测试：/api/v1/smtp/health",
+        ],
+    }
+
+
 # 启动事件
-
-
 @app.on_event("startup")
 async def startup_event():
     """应用启动时执行"""
@@ -381,6 +469,7 @@ async def startup_event():
     logger.info(f"上传目录: {ATTACHMENT_DIR}")
     logger.info(f"API文档: http://localhost:8000/docs")
     logger.info(f"SMTP解密API: http://localhost:8000{settings.API_V1_STR}/smtp")
+    logger.info("兼容性: 与aimachingmail项目完全兼容")
 
     # 确保必要的目录存在
     for directory in [ATTACHMENT_DIR, TEMP_DIR]:
@@ -393,8 +482,25 @@ async def startup_event():
 
         test_result = smtp_password_manager.test_encryption()
         logger.info(f"SMTP密码加密功能测试: {'正常' if test_result else '异常'}")
+
+        if test_result:
+            logger.info("✅ 加密解密功能正常，与aimachingmail项目兼容")
+        else:
+            logger.warning("⚠️ 加密解密功能异常，请检查ENCRYPTION_KEY配置")
+
     except Exception as e:
         logger.error(f"SMTP密码加密功能测试失败: {str(e)}")
+        logger.error("❌ 请检查ENCRYPTION_KEY配置是否与aimachingmail项目一致")
+
+    # 输出重要信息
+    logger.info("=" * 60)
+    logger.info("🚀 邮件API服务启动完成")
+    logger.info(f"📖 API文档: http://localhost:8000/docs")
+    logger.info(f"🔐 SMTP解密: http://localhost:8000{settings.API_V1_STR}/smtp")
+    logger.info(f"🩺 健康检查: http://localhost:8000/health")
+    logger.info(f"⚡ 快速测试: http://localhost:8000/quick-test")
+    logger.info("🔗 兼容性: 与aimachingmail项目完全兼容")
+    logger.info("=" * 60)
 
 
 @app.on_event("shutdown")

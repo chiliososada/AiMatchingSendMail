@@ -47,23 +47,64 @@ class SMTPService:
 
     def _decrypt_smtp_password(self) -> str:
         """
-        解密SMTP密码
+        解密SMTP密码 - 修复版，与aimachingmail项目兼容
 
         Returns:
             str: 解密后的明文密码
         """
         try:
-            # 使用全局密码管理器或传统解密函数
-            try:
-                return smtp_password_manager.decrypt(
-                    self.settings.smtp_password_encrypted
+            encrypted_password = self.settings.smtp_password_encrypted
+
+            if not encrypted_password:
+                raise Exception("SMTP密码为空")
+
+            logger.info(f"开始解密SMTP密码，数据类型: {type(encrypted_password)}")
+
+            # 处理不同类型的加密密码数据
+            if isinstance(encrypted_password, str):
+                # 字符串类型，可能是hex格式或base64格式
+                logger.info(
+                    f"处理字符串格式的加密密码，长度: {len(encrypted_password)}"
                 )
-            except:
-                # 回退到传统解密方法
-                return decrypt_password(self.settings.smtp_password_encrypted)
+
+                # 处理hex格式（如 \x开头的字符串）
+                if encrypted_password.startswith("\\x"):
+                    hex_str = encrypted_password[2:]
+                    logger.info(f"检测到\\x格式，转换hex: {hex_str[:20]}...")
+                    try:
+                        password_bytes = bytes.fromhex(hex_str)
+                        return smtp_password_manager.decrypt(password_bytes)
+                    except ValueError as ve:
+                        logger.error(f"hex转换失败: {ve}")
+                        raise Exception(f"hex格式密码转换失败: {ve}")
+                else:
+                    # 普通字符串，尝试直接解密
+                    logger.info("尝试直接解密字符串格式")
+                    return smtp_password_manager.decrypt(encrypted_password)
+
+            elif isinstance(encrypted_password, bytes):
+                # bytes类型，直接解密
+                logger.info(f"处理bytes格式的加密密码，长度: {len(encrypted_password)}")
+                return smtp_password_manager.decrypt(encrypted_password)
+            else:
+                # 其他类型，尝试转换
+                logger.warning(f"未知的密码数据类型: {type(encrypted_password)}")
+                return smtp_password_manager.decrypt(str(encrypted_password))
+
         except Exception as e:
-            logger.error(f"解密SMTP密码失败: {str(e)}")
-            raise Exception("SMTP密码解密失败，请检查加密密钥配置")
+            logger.error(f"解密SMTP密码失败，原始错误: {str(e)}")
+
+            # 尝试回退到传统解密方法
+            try:
+                logger.info("尝试使用传统解密方法")
+                return decrypt_password(str(self.settings.smtp_password_encrypted))
+            except Exception as fallback_error:
+                logger.error(f"传统解密方法也失败: {str(fallback_error)}")
+
+            # 所有方法都失败
+            error_msg = f"SMTP密码解密失败，请检查加密密钥配置。原始错误: {str(e)}"
+            logger.error(error_msg)
+            raise Exception(error_msg)
 
     @property
     def smtp_password(self) -> str:

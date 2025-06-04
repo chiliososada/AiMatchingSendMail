@@ -1,7 +1,9 @@
 # app/config.py
 from pydantic_settings import BaseSettings
+from pydantic import field_validator
 from typing import List, Optional, Any, Dict, Union
 import os
+import re
 from pathlib import Path
 
 
@@ -18,15 +20,15 @@ class Settings(BaseSettings):
     WORKERS: int = 1
 
     # 数据库配置
-    DATABASE_URL: str = "sqlite:///./email_api.db"  # 默认SQLite数据库
-    DATABASE_ECHO: bool = False  # 是否打印SQL语句
+    DATABASE_URL: str = "sqlite:///./email_api.db"
+    DATABASE_ECHO: bool = False
     DATABASE_POOL_SIZE: int = 5
     DATABASE_MAX_OVERFLOW: int = 10
 
     # 安全配置
     SECRET_KEY: str = "your-secret-key-change-in-production"
-    ENCRYPTION_KEY: Optional[str] = None  # Fernet加密密钥
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8  # 8天
+    ENCRYPTION_KEY: Optional[str] = None
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8
 
     # CORS配置
     BACKEND_CORS_ORIGINS: List[str] = [
@@ -37,19 +39,19 @@ class Settings(BaseSettings):
         "https://localhost:8080",
     ]
 
-    # Redis配置（可选，当前未使用）
+    # Redis配置
     REDIS_URL: Optional[str] = None
     REDIS_PASSWORD: Optional[str] = None
     REDIS_DB: int = 0
     REDIS_ENABLED: bool = False
 
-    # 文件上传配置 - 修复：移除注释，使用纯整数值
+    # 文件上传配置
     UPLOAD_DIR: str = "uploads"
     ATTACHMENT_DIR: str = "uploads/attachments"
     TEMP_DIR: str = "uploads/temp"
-    MAX_FILE_SIZE: int = 26214400  # 25MB in bytes
+    MAX_FILE_SIZE: int = 26214400
     MAX_FILES_PER_REQUEST: int = 10
-    MAX_TOTAL_REQUEST_SIZE: int = 104857600  # 100MB in bytes
+    MAX_TOTAL_REQUEST_SIZE: int = 104857600
 
     # 支持的文件类型
     ALLOWED_EXTENSIONS: List[str] = [
@@ -80,7 +82,7 @@ class Settings(BaseSettings):
         ".rtf",
     ]
 
-    # 禁止的文件类型（安全考虑）
+    # 禁止的文件类型
     FORBIDDEN_EXTENSIONS: List[str] = [
         ".exe",
         ".bat",
@@ -108,31 +110,31 @@ class Settings(BaseSettings):
     AUTO_CLEANUP_ENABLED: bool = True
     CLEANUP_INTERVAL_HOURS: int = 6
 
-    # 日志配置 - 修复：移除注释
+    # 日志配置
     LOG_LEVEL: str = "INFO"
     LOG_FILE: str = "app.log"
-    LOG_MAX_SIZE: int = 10485760  # 10MB in bytes
+    LOG_MAX_SIZE: int = 10485760
     LOG_BACKUP_COUNT: int = 5
 
     # 监控和性能配置
     ENABLE_METRICS: bool = True
     METRICS_PORT: int = 9090
-    REQUEST_TIMEOUT: int = 300  # 5分钟
+    REQUEST_TIMEOUT: int = 300
 
     # 速率限制配置
     RATE_LIMIT_ENABLED: bool = True
     RATE_LIMIT_REQUESTS: int = 100
-    RATE_LIMIT_WINDOW: int = 60  # 60秒窗口
+    RATE_LIMIT_WINDOW: int = 60
 
     # SMTP默认配置
     DEFAULT_SMTP_TIMEOUT: int = 30
-    DEFAULT_RETRY_DELAY: int = 60  # 重试延迟（秒）
+    DEFAULT_RETRY_DELAY: int = 60
 
     # 环境配置
-    ENVIRONMENT: str = "development"  # development, testing, production
+    ENVIRONMENT: str = "development"
 
     # 第三方服务配置
-    SENTRY_DSN: Optional[str] = None  # Sentry错误监控
+    SENTRY_DSN: Optional[str] = None
 
     # 数据库备份配置
     BACKUP_ENABLED: bool = False
@@ -148,7 +150,7 @@ class Settings(BaseSettings):
     ANALYTICS_RETENTION_DAYS: int = 90
 
     # 缓存配置
-    CACHE_TTL_SECONDS: int = 300  # 5分钟
+    CACHE_TTL_SECONDS: int = 300
     CACHE_MAX_SIZE: int = 1000
 
     # 并发配置
@@ -193,6 +195,32 @@ class Settings(BaseSettings):
         "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
         "Referrer-Policy": "strict-origin-when-cross-origin",
     }
+
+    # 字段验证器 - 清理带注释的数值
+    @field_validator(
+        "MAX_FILE_SIZE", "MAX_TOTAL_REQUEST_SIZE", "LOG_MAX_SIZE", mode="before"
+    )
+    @classmethod
+    def clean_integer_values(cls, v):
+        """清理包含注释的整数值"""
+        if isinstance(v, str):
+            # 移除注释部分（# 之后的内容）
+            cleaned = re.sub(r"\s*#.*$", "", v.strip())
+            try:
+                return int(cleaned)
+            except ValueError:
+                # 如果无法转换，尝试提取数字
+                numbers = re.findall(r"\d+", v)
+                if numbers:
+                    return int(numbers[0])
+                # 返回默认值
+                if "MAX_FILE_SIZE" in str(v):
+                    return 26214400
+                elif "MAX_TOTAL_REQUEST_SIZE" in str(v):
+                    return 104857600
+                elif "LOG_MAX_SIZE" in str(v):
+                    return 10485760
+        return v
 
     @property
     def upload_path(self) -> Path:
@@ -296,7 +324,7 @@ class Settings(BaseSettings):
                 errors.append(f"缺少必需的配置: {setting}")
 
         # 验证文件大小限制
-        if self.MAX_FILE_SIZE > 100 * 1024 * 1024:  # 100MB
+        if self.MAX_FILE_SIZE > 100 * 1024 * 1024:
             errors.append("MAX_FILE_SIZE 不能超过100MB")
 
         if self.MAX_TOTAL_REQUEST_SIZE < self.MAX_FILE_SIZE:
@@ -324,7 +352,6 @@ class Settings(BaseSettings):
         if not hide_password:
             return self.DATABASE_URL
 
-        # 隐藏密码用于日志记录
         url = self.DATABASE_URL
         if "://" in url and "@" in url:
             protocol, rest = url.split("://", 1)
@@ -347,61 +374,53 @@ class Settings(BaseSettings):
         env_file = ".env"
         env_file_encoding = "utf-8"
         case_sensitive = True
-        # 允许额外字段，避免Pydantic V2错误
         extra = "allow"
-
-        # 环境变量前缀
         env_prefix = ""
 
 
 # 创建全局设置实例
 try:
     settings = Settings()
+    print("✅ 配置加载成功")
 except Exception as e:
-    print(f"配置加载失败: {str(e)}")
+    print(f"❌ 配置加载失败: {str(e)}")
     print("使用默认配置启动...")
-    # 创建一个最小配置用于启动
     settings = Settings(
         DATABASE_URL="sqlite:///./email_api.db",
         SECRET_KEY="development-secret-key",
         ENCRYPTION_KEY=None,
     )
 
-# 只在启用验证时进行配置验证
+# 配置验证
 if settings.VALIDATE_CONFIG_ON_STARTUP:
     validation_errors = settings.validate_settings()
     if validation_errors:
         import sys
 
-        print("配置验证警告:")
+        print("⚠️  配置验证警告:")
         for error in validation_errors:
             print(f"  - {error}")
-        # 在开发环境中，警告不中断启动
         if settings.is_production():
-            print("生产环境中检测到配置错误，退出...")
+            print("🚫 生产环境中检测到配置错误，退出...")
             sys.exit(1)
 
 # 创建必要的目录
 try:
     settings.create_directories()
+    print(f"📁 目录创建成功: {settings.attachment_path}")
 except Exception as e:
-    print(f"创建目录失败: {str(e)}")
+    print(f"❌ 创建目录失败: {str(e)}")
 
-# 开发环境下的额外配置
+# 环境特定配置
 if settings.is_development():
     settings.DATABASE_ECHO = True
     settings.DEBUG = True
+    print("🔧 开发环境配置已应用")
 
-# 生产环境下的安全配置
 if settings.is_production():
     settings.DATABASE_ECHO = False
     settings.DEBUG = False
+    print("🔒 生产环境配置已应用")
 
-    # 生产环境必须使用HTTPS
-    if not any(
-        origin.startswith("https://") for origin in settings.BACKEND_CORS_ORIGINS
-    ):
-        print("警告: 生产环境建议使用HTTPS")
-
-# 导出常用配置
+# 导出
 __all__ = ["settings", "Settings"]

@@ -1,5 +1,5 @@
 # app/utils/security.py
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from passlib.context import CryptContext
@@ -56,8 +56,16 @@ MIME_TYPE_MAPPING = {
 }
 
 
+def _derive_key(key: str) -> bytes:
+    """
+    派生Fernet兼容的密钥 - 与aimachingmail项目完全一致
+    使用简单的SHA256哈希，而不是PBKDF2
+    """
+    return base64.urlsafe_b64encode(hashlib.sha256(key.encode()).digest())
+
+
 def get_encryption_key() -> bytes:
-    """获取或生成加密密钥 - 与系统完全一致"""
+    """获取或生成加密密钥 - 与aimachingmail项目完全一致"""
     if settings.ENCRYPTION_KEY:
         try:
             # 如果是base64编码的密钥（44字符且以=结尾）
@@ -66,10 +74,8 @@ def get_encryption_key() -> bytes:
             ):
                 return base64.urlsafe_b64decode(settings.ENCRYPTION_KEY.encode())
             else:
-                # 如果是普通字符串，使用PBKDF2派生密钥（与系统一致）
-                return derive_key_from_password(
-                    settings.ENCRYPTION_KEY, b"email_api_salt"
-                )
+                # 如果是普通字符串，使用与aimachingmail一致的简单SHA256派生
+                return _derive_key(settings.ENCRYPTION_KEY)
         except Exception as e:
             logger.error(f"解析加密密钥失败: {str(e)}")
             raise Exception("加密密钥格式错误")
@@ -81,20 +87,9 @@ def get_encryption_key() -> bytes:
     return key
 
 
-def derive_key_from_password(password: str, salt: bytes) -> bytes:
-    """从密码派生加密密钥 - 与系统完全一致"""
-    kdf = PBKDF2HMAC(
-        algorithm=hashes.SHA256(),
-        length=32,
-        salt=salt,
-        iterations=100000,  # 100,000次迭代，与系统一致
-    )
-    return base64.urlsafe_b64encode(kdf.derive(password.encode()))
-
-
 def encrypt_password(password: str) -> str:
     """
-    加密SMTP密码 - 与系统完全一致
+    加密SMTP密码 - 与aimachingmail项目完全一致
 
     Args:
         password: 明文密码
@@ -113,22 +108,44 @@ def encrypt_password(password: str) -> str:
 
 def decrypt_password(encrypted_password: str) -> str:
     """
-    解密SMTP密码 - 与系统完全一致
+    解密SMTP密码 - 与aimachingmail项目完全一致
 
     Args:
-        encrypted_password: base64编码的加密密码
+        encrypted_password: base64编码的加密密码或原始bytes
 
     Returns:
         str: 明文密码
     """
     try:
         f = Fernet(get_encryption_key())
-        encrypted_bytes = base64.urlsafe_b64decode(encrypted_password.encode())
+
+        # 处理不同格式的输入
+        if isinstance(encrypted_password, str):
+            # 如果是字符串，尝试base64解码
+            try:
+                encrypted_bytes = base64.urlsafe_b64decode(encrypted_password.encode())
+            except:
+                # 如果解码失败，可能是hex格式或其他格式
+                if encrypted_password.startswith("\\x"):
+                    hex_str = encrypted_password[2:]
+                else:
+                    hex_str = encrypted_password
+                try:
+                    encrypted_bytes = bytes.fromhex(hex_str)
+                except:
+                    # 直接当作bytes处理
+                    encrypted_bytes = encrypted_password.encode()
+        else:
+            encrypted_bytes = encrypted_password
+
         decrypted = f.decrypt(encrypted_bytes)
         return decrypted.decode()
+    except InvalidToken:
+        logger.error("密码解密失败: Invalid token or incorrect key.")
+        raise Exception("密码解密失败: Invalid token or incorrect key.")
     except Exception as e:
         logger.error(f"密码解密失败: {str(e)}")
-        raise Exception("密码解密失败")
+        raise Exception(f"密码解密失败: {str(e)}")
 
 
 def hash_password(password: str) -> str:
@@ -174,9 +191,9 @@ def verify_file_integrity(
     return hmac.compare_digest(actual_hash, expected_hash)
 
 
-# ========== 新增：专门的SMTP密码处理类 ==========
+# ========== SMTP密码处理类 - 修复版 ==========
 class SMTPPasswordManager:
-    """SMTP密码管理器 - 专门处理SMTP密码的加密解密"""
+    """SMTP密码管理器 - 与aimachingmail项目完全兼容"""
 
     def __init__(self, encryption_key: Optional[str] = None):
         """
@@ -189,7 +206,7 @@ class SMTPPasswordManager:
         self._fernet_key = self._get_fernet_key()
 
     def _get_fernet_key(self) -> bytes:
-        """获取Fernet密钥"""
+        """获取Fernet密钥 - 与aimachingmail项目完全一致"""
         if not self.encryption_key:
             raise ValueError("未设置加密密钥")
 
@@ -198,8 +215,8 @@ class SMTPPasswordManager:
             if len(self.encryption_key) == 44 and self.encryption_key.endswith("="):
                 return base64.urlsafe_b64decode(self.encryption_key.encode())
             else:
-                # 使用PBKDF2派生
-                return derive_key_from_password(self.encryption_key, b"email_api_salt")
+                # 使用与aimachingmail一致的简单SHA256派生
+                return _derive_key(self.encryption_key)
         except Exception as e:
             logger.error(f"获取Fernet密钥失败: {str(e)}")
             raise Exception("加密密钥配置错误")
@@ -214,23 +231,67 @@ class SMTPPasswordManager:
             logger.error(f"密码加密失败: {str(e)}")
             raise Exception("密码加密失败")
 
-    def decrypt(self, encrypted_password: str) -> str:
-        """解密密码"""
+    def decrypt(self, encrypted_password: Union[str, bytes]) -> str:
+        """
+        解密密码 - 增强版，支持多种输入格式
+
+        Args:
+            encrypted_password: 加密的密码，支持多种格式
+
+        Returns:
+            str: 解密后的明文密码
+        """
         try:
             f = Fernet(self._fernet_key)
-            encrypted_bytes = base64.urlsafe_b64decode(encrypted_password.encode())
+
+            # 处理不同类型的输入
+            if isinstance(encrypted_password, bytes):
+                encrypted_bytes = encrypted_password
+            elif isinstance(encrypted_password, str):
+                # 处理文本字符串
+                if encrypted_password.startswith("\\x"):
+                    # 处理 \x 开头的hex字符串
+                    hex_str = encrypted_password[2:]
+                    try:
+                        encrypted_bytes = bytes.fromhex(hex_str)
+                    except ValueError as ve:
+                        logger.error(f"Failed to convert hex string to bytes: {ve}")
+                        raise Exception(f"无效的hex格式: {encrypted_password}")
+                else:
+                    # 尝试base64解码
+                    try:
+                        encrypted_bytes = base64.urlsafe_b64decode(
+                            encrypted_password.encode()
+                        )
+                    except Exception:
+                        # 如果base64解码失败，尝试当作hex处理
+                        try:
+                            encrypted_bytes = bytes.fromhex(encrypted_password)
+                        except:
+                            # 最后尝试直接当作bytes
+                            encrypted_bytes = encrypted_password.encode()
+            else:
+                raise ValueError(f"不支持的加密密码类型: {type(encrypted_password)}")
+
+            # 解密
             decrypted = f.decrypt(encrypted_bytes)
             return decrypted.decode()
+
+        except InvalidToken:
+            logger.error("解密失败: Invalid token or incorrect key")
+            raise Exception("密码解密失败: Invalid token or incorrect key")
         except Exception as e:
             logger.error(f"密码解密失败: {str(e)}")
-            raise Exception("密码解密失败")
+            raise Exception(f"密码解密失败: {str(e)}")
 
     def test_encryption(self, test_password: str = "test_password_123") -> bool:
         """测试加密解密功能"""
         try:
             encrypted = self.encrypt(test_password)
             decrypted = self.decrypt(encrypted)
-            return decrypted == test_password
+            result = decrypted == test_password
+            logger.info(f"加密测试结果: {result}")
+            return result
         except Exception as e:
             logger.error(f"加密测试失败: {str(e)}")
             return False

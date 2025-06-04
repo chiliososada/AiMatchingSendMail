@@ -362,15 +362,26 @@ class EmailService:
         )
 
     async def test_smtp_connection(self, tenant_id: UUID, setting_id: UUID) -> dict:
-        """测试SMTP连接"""
+        """测试SMTP连接 - 修复版"""
         try:
             smtp_settings = self.get_smtp_settings(tenant_id, setting_id)
             if not smtp_settings:
                 return {"status": "failed", "message": "SMTP设置不存在"}
 
+            logger.info(f"开始测试SMTP连接: {smtp_settings.setting_name}")
+
             # 使用增强的SMTP服务
-            smtp_service = SMTPService(smtp_settings)
-            result = await smtp_service.test_connection()
+            try:
+                smtp_service = SMTPService(smtp_settings)
+                result = await smtp_service.test_connection()
+            except Exception as service_error:
+                logger.error(f"创建SMTP服务失败: {str(service_error)}")
+                return {
+                    "status": "failed",
+                    "message": f"SMTP服务初始化失败: {str(service_error)}",
+                    "error": str(service_error),
+                    "error_type": "service_initialization_error",
+                }
 
             # 更新连接状态
             smtp_settings.connection_status = result["status"]
@@ -386,6 +397,9 @@ class EmailService:
 
         except Exception as e:
             logger.error(f"SMTP连接测试失败: {str(e)}")
+            import traceback
+
+            logger.error(f"详细错误信息: {traceback.format_exc()}")
             return {
                 "status": "failed",
                 "message": f"测试过程中发生错误: {str(e)}",
@@ -790,14 +804,15 @@ class EmailService:
         return self.attachment_manager.cleanup_old_files(tenant_id)
 
     def get_smtp_config_info(
-        self, tenant_id: UUID, setting_id: UUID
+        self, tenant_id: UUID, setting_id: Optional[UUID] = None
     ) -> Optional[Dict[str, Any]]:
         """
         获取SMTP配置信息（包含解密后的密码，仅供内部使用）
+        修复版 - 与aimachingmail项目兼容
 
         Args:
             tenant_id: 租户ID
-            setting_id: 设置ID
+            setting_id: 设置ID，如果为None则获取默认设置
 
         Returns:
             Optional[Dict]: SMTP配置信息
@@ -805,12 +820,61 @@ class EmailService:
         try:
             smtp_settings = self.get_smtp_settings(tenant_id, setting_id)
             if not smtp_settings:
+                logger.warning(
+                    f"未找到SMTP设置: tenant_id={tenant_id}, setting_id={setting_id}"
+                )
                 return None
 
-            # 解密密码
-            decrypted_password = smtp_password_manager.decrypt(
-                smtp_settings.smtp_password_encrypted
-            )
+            logger.info(f"开始解密SMTP配置: {smtp_settings.setting_name}")
+
+            # 获取加密的密码字段
+            encrypted_password = smtp_settings.smtp_password_encrypted
+            if not encrypted_password:
+                logger.error("SMTP密码字段为空")
+                return None
+
+            logger.info(f"加密密码数据类型: {type(encrypted_password)}")
+
+            # 解密密码 - 处理不同格式的数据库字段
+            try:
+                if isinstance(encrypted_password, str):
+                    # 处理字符串格式（可能是hex格式）
+                    if encrypted_password.startswith("\\x"):
+                        # 处理 \x 开头的hex字符串
+                        hex_str = encrypted_password[2:]
+                        logger.info(f"检测到\\x格式，hex长度: {len(hex_str)}")
+                        try:
+                            password_bytes = bytes.fromhex(hex_str)
+                            decrypted_password = smtp_password_manager.decrypt(
+                                password_bytes
+                            )
+                        except ValueError as ve:
+                            logger.error(f"hex转换失败: {ve}")
+                            return None
+                    else:
+                        # 普通字符串格式
+                        logger.info("尝试直接解密字符串格式")
+                        decrypted_password = smtp_password_manager.decrypt(
+                            encrypted_password
+                        )
+                elif isinstance(encrypted_password, bytes):
+                    # bytes格式
+                    logger.info("处理bytes格式的加密密码")
+                    decrypted_password = smtp_password_manager.decrypt(
+                        encrypted_password
+                    )
+                else:
+                    # 其他格式，转换为字符串
+                    logger.info(f"未知格式，转换为字符串: {type(encrypted_password)}")
+                    decrypted_password = smtp_password_manager.decrypt(
+                        str(encrypted_password)
+                    )
+
+                logger.info("SMTP密码解密成功")
+
+            except Exception as decrypt_error:
+                logger.error(f"解密失败: {str(decrypt_error)}")
+                return None
 
             return {
                 "id": str(smtp_settings.id),
@@ -843,4 +907,7 @@ class EmailService:
 
         except Exception as e:
             logger.error(f"获取SMTP配置信息失败: {str(e)}")
+            import traceback
+
+            logger.error(f"详细错误信息: {traceback.format_exc()}")
             return None
