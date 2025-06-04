@@ -18,13 +18,13 @@ class Settings(BaseSettings):
     WORKERS: int = 1
 
     # 数据库配置
-    DATABASE_URL: str
+    DATABASE_URL: str = "sqlite:///./email_api.db"  # 默认SQLite数据库
     DATABASE_ECHO: bool = False  # 是否打印SQL语句
     DATABASE_POOL_SIZE: int = 5
     DATABASE_MAX_OVERFLOW: int = 10
 
     # 安全配置
-    SECRET_KEY: str
+    SECRET_KEY: str = "your-secret-key-change-in-production"
     ENCRYPTION_KEY: Optional[str] = None  # Fernet加密密钥
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8  # 8天
 
@@ -43,13 +43,13 @@ class Settings(BaseSettings):
     REDIS_DB: int = 0
     REDIS_ENABLED: bool = False
 
-    # 文件上传配置
+    # 文件上传配置 - 修复：移除注释，使用纯整数值
     UPLOAD_DIR: str = "uploads"
     ATTACHMENT_DIR: str = "uploads/attachments"
     TEMP_DIR: str = "uploads/temp"
-    MAX_FILE_SIZE: int = 25 * 1024 * 1024  # 25MB
+    MAX_FILE_SIZE: int = 26214400  # 25MB in bytes
     MAX_FILES_PER_REQUEST: int = 10
-    MAX_TOTAL_REQUEST_SIZE: int = 100 * 1024 * 1024  # 100MB
+    MAX_TOTAL_REQUEST_SIZE: int = 104857600  # 100MB in bytes
 
     # 支持的文件类型
     ALLOWED_EXTENSIONS: List[str] = [
@@ -108,10 +108,10 @@ class Settings(BaseSettings):
     AUTO_CLEANUP_ENABLED: bool = True
     CLEANUP_INTERVAL_HOURS: int = 6
 
-    # 日志配置
+    # 日志配置 - 修复：移除注释
     LOG_LEVEL: str = "INFO"
     LOG_FILE: str = "app.log"
-    LOG_MAX_SIZE: int = 10 * 1024 * 1024  # 10MB
+    LOG_MAX_SIZE: int = 10485760  # 10MB in bytes
     LOG_BACKUP_COUNT: int = 5
 
     # 监控和性能配置
@@ -154,8 +154,6 @@ class Settings(BaseSettings):
     # 并发配置
     MAX_CONCURRENT_SENDS: int = 10
     BATCH_SIZE: int = 50
-
-    # ========== 新增的配置项（解决Pydantic错误） ==========
 
     # 健康检查配置
     HEALTH_CHECK_INTERVAL: int = 30
@@ -222,6 +220,10 @@ class Settings(BaseSettings):
     def is_testing(self) -> bool:
         """判断是否为测试环境"""
         return self.ENVIRONMENT.lower() == "testing"
+
+    def get_file_size_mb(self, size_bytes: int) -> float:
+        """将字节转换为MB"""
+        return size_bytes / (1024 * 1024)
 
     def get_log_config(self) -> Dict[str, Any]:
         """获取日志配置"""
@@ -333,6 +335,14 @@ class Settings(BaseSettings):
                     return f"{protocol}://{username}:***@{host_part}"
         return url
 
+    def get_size_info(self) -> Dict[str, str]:
+        """获取文件大小信息（便于查看）"""
+        return {
+            "max_file_size": f"{self.get_file_size_mb(self.MAX_FILE_SIZE):.1f}MB",
+            "max_total_request_size": f"{self.get_file_size_mb(self.MAX_TOTAL_REQUEST_SIZE):.1f}MB",
+            "log_max_size": f"{self.get_file_size_mb(self.LOG_MAX_SIZE):.1f}MB",
+        }
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
@@ -345,7 +355,17 @@ class Settings(BaseSettings):
 
 
 # 创建全局设置实例
-settings = Settings()
+try:
+    settings = Settings()
+except Exception as e:
+    print(f"配置加载失败: {str(e)}")
+    print("使用默认配置启动...")
+    # 创建一个最小配置用于启动
+    settings = Settings(
+        DATABASE_URL="sqlite:///./email_api.db",
+        SECRET_KEY="development-secret-key",
+        ENCRYPTION_KEY=None,
+    )
 
 # 只在启用验证时进行配置验证
 if settings.VALIDATE_CONFIG_ON_STARTUP:
@@ -353,13 +373,19 @@ if settings.VALIDATE_CONFIG_ON_STARTUP:
     if validation_errors:
         import sys
 
-        print("配置验证失败:")
+        print("配置验证警告:")
         for error in validation_errors:
             print(f"  - {error}")
-        sys.exit(1)
+        # 在开发环境中，警告不中断启动
+        if settings.is_production():
+            print("生产环境中检测到配置错误，退出...")
+            sys.exit(1)
 
 # 创建必要的目录
-settings.create_directories()
+try:
+    settings.create_directories()
+except Exception as e:
+    print(f"创建目录失败: {str(e)}")
 
 # 开发环境下的额外配置
 if settings.is_development():

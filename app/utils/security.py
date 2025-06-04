@@ -57,21 +57,22 @@ MIME_TYPE_MAPPING = {
 
 
 def get_encryption_key() -> bytes:
-    """获取或生成加密密钥"""
+    """获取或生成加密密钥 - 与系统完全一致"""
     if settings.ENCRYPTION_KEY:
         try:
-            # 如果是base64编码的密钥
+            # 如果是base64编码的密钥（44字符且以=结尾）
             if len(settings.ENCRYPTION_KEY) == 44 and settings.ENCRYPTION_KEY.endswith(
                 "="
             ):
                 return base64.urlsafe_b64decode(settings.ENCRYPTION_KEY.encode())
             else:
-                # 如果是普通字符串，生成密钥
+                # 如果是普通字符串，使用PBKDF2派生密钥（与系统一致）
                 return derive_key_from_password(
                     settings.ENCRYPTION_KEY, b"email_api_salt"
                 )
         except Exception as e:
             logger.error(f"解析加密密钥失败: {str(e)}")
+            raise Exception("加密密钥格式错误")
 
     # 生成新密钥
     key = Fernet.generate_key()
@@ -81,18 +82,26 @@ def get_encryption_key() -> bytes:
 
 
 def derive_key_from_password(password: str, salt: bytes) -> bytes:
-    """从密码派生加密密钥"""
+    """从密码派生加密密钥 - 与系统完全一致"""
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
         length=32,
         salt=salt,
-        iterations=100000,
+        iterations=100000,  # 100,000次迭代，与系统一致
     )
     return base64.urlsafe_b64encode(kdf.derive(password.encode()))
 
 
 def encrypt_password(password: str) -> str:
-    """加密密码"""
+    """
+    加密SMTP密码 - 与系统完全一致
+
+    Args:
+        password: 明文密码
+
+    Returns:
+        str: base64编码的加密密码
+    """
     try:
         f = Fernet(get_encryption_key())
         encrypted = f.encrypt(password.encode())
@@ -103,7 +112,15 @@ def encrypt_password(password: str) -> str:
 
 
 def decrypt_password(encrypted_password: str) -> str:
-    """解密密码"""
+    """
+    解密SMTP密码 - 与系统完全一致
+
+    Args:
+        encrypted_password: base64编码的加密密码
+
+    Returns:
+        str: 明文密码
+    """
     try:
         f = Fernet(get_encryption_key())
         encrypted_bytes = base64.urlsafe_b64decode(encrypted_password.encode())
@@ -155,6 +172,142 @@ def verify_file_integrity(
     """验证文件完整性"""
     actual_hash = calculate_file_hash(file_content, algorithm)
     return hmac.compare_digest(actual_hash, expected_hash)
+
+
+# ========== 新增：专门的SMTP密码处理类 ==========
+class SMTPPasswordManager:
+    """SMTP密码管理器 - 专门处理SMTP密码的加密解密"""
+
+    def __init__(self, encryption_key: Optional[str] = None):
+        """
+        初始化密码管理器
+
+        Args:
+            encryption_key: 可选的加密密钥，如果不提供则使用系统默认
+        """
+        self.encryption_key = encryption_key or settings.ENCRYPTION_KEY
+        self._fernet_key = self._get_fernet_key()
+
+    def _get_fernet_key(self) -> bytes:
+        """获取Fernet密钥"""
+        if not self.encryption_key:
+            raise ValueError("未设置加密密钥")
+
+        try:
+            # 如果是base64编码的密钥
+            if len(self.encryption_key) == 44 and self.encryption_key.endswith("="):
+                return base64.urlsafe_b64decode(self.encryption_key.encode())
+            else:
+                # 使用PBKDF2派生
+                return derive_key_from_password(self.encryption_key, b"email_api_salt")
+        except Exception as e:
+            logger.error(f"获取Fernet密钥失败: {str(e)}")
+            raise Exception("加密密钥配置错误")
+
+    def encrypt(self, password: str) -> str:
+        """加密密码"""
+        try:
+            f = Fernet(self._fernet_key)
+            encrypted = f.encrypt(password.encode())
+            return base64.urlsafe_b64encode(encrypted).decode()
+        except Exception as e:
+            logger.error(f"密码加密失败: {str(e)}")
+            raise Exception("密码加密失败")
+
+    def decrypt(self, encrypted_password: str) -> str:
+        """解密密码"""
+        try:
+            f = Fernet(self._fernet_key)
+            encrypted_bytes = base64.urlsafe_b64decode(encrypted_password.encode())
+            decrypted = f.decrypt(encrypted_bytes)
+            return decrypted.decode()
+        except Exception as e:
+            logger.error(f"密码解密失败: {str(e)}")
+            raise Exception("密码解密失败")
+
+    def test_encryption(self, test_password: str = "test_password_123") -> bool:
+        """测试加密解密功能"""
+        try:
+            encrypted = self.encrypt(test_password)
+            decrypted = self.decrypt(encrypted)
+            return decrypted == test_password
+        except Exception as e:
+            logger.error(f"加密测试失败: {str(e)}")
+            return False
+
+    def get_key_info(self) -> Dict[str, Any]:
+        """获取密钥信息（用于调试，不包含实际密钥）"""
+        return {
+            "key_length": len(self.encryption_key) if self.encryption_key else 0,
+            "key_type": (
+                "base64"
+                if (
+                    self.encryption_key
+                    and len(self.encryption_key) == 44
+                    and self.encryption_key.endswith("=")
+                )
+                else "string"
+            ),
+            "key_prefix": (
+                self.encryption_key[:8] + "..." if self.encryption_key else "None"
+            ),
+            "fernet_key_length": len(self._fernet_key),
+            "test_result": self.test_encryption(),
+        }
+
+
+# ========== 兼容性函数 ==========
+def test_smtp_password_encryption():
+    """测试SMTP密码加密解密功能"""
+    try:
+        manager = SMTPPasswordManager()
+        test_passwords = [
+            "simple_password",
+            "复杂密码!@#$%^&*()",
+            "password_with_123_numbers",
+            "Gmail应用密码16位字符",
+        ]
+
+        results = []
+        for password in test_passwords:
+            try:
+                encrypted = manager.encrypt(password)
+                decrypted = manager.decrypt(encrypted)
+                success = decrypted == password
+
+                results.append(
+                    {
+                        "password_length": len(password),
+                        "encrypted_length": len(encrypted),
+                        "success": success,
+                        "error": None if success else "解密结果不匹配",
+                    }
+                )
+            except Exception as e:
+                results.append(
+                    {
+                        "password_length": len(password),
+                        "encrypted_length": 0,
+                        "success": False,
+                        "error": str(e),
+                    }
+                )
+
+        return {
+            "overall_success": all(r["success"] for r in results),
+            "test_count": len(results),
+            "success_count": sum(1 for r in results if r["success"]),
+            "results": results,
+            "key_info": manager.get_key_info(),
+        }
+
+    except Exception as e:
+        return {
+            "overall_success": False,
+            "error": str(e),
+            "test_count": 0,
+            "success_count": 0,
+        }
 
 
 class FileValidator:
@@ -469,8 +622,9 @@ def get_security_headers() -> Dict[str, str]:
     }
 
 
-# 创建全局文件验证器实例
+# 创建全局实例
 file_validator = FileValidator()
+smtp_password_manager = SMTPPasswordManager()
 
 # 导出
 __all__ = [
@@ -489,4 +643,7 @@ __all__ = [
     "create_signed_url",
     "verify_signed_url",
     "get_security_headers",
+    "SMTPPasswordManager",
+    "smtp_password_manager",
+    "test_smtp_password_encryption",
 ]

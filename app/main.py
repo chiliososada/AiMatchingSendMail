@@ -12,6 +12,7 @@ import os
 
 from .config import settings
 from .api.email_routes import router as email_router
+from .api.smtp_routes import router as smtp_router  # 新增SMTP路由
 from .database import engine, Base
 
 # 配置日志
@@ -36,7 +37,21 @@ for directory in [UPLOAD_DIR, ATTACHMENT_DIR, TEMP_DIR]:
 # 创建FastAPI应用
 app = FastAPI(
     title=settings.PROJECT_NAME,
-    description="多租户邮件发送系统 API - 支持附件、SMTP配置管理、邮件队列等功能",
+    description="""
+    多租户邮件发送系统 API - 支持附件、SMTP配置管理、邮件队列等功能
+    
+    ## 主要功能
+    - 邮件发送和管理
+    - SMTP配置和密码解密
+    - 附件上传和管理
+    - 邮件队列和状态跟踪
+    - 统计分析和监控
+    
+    ## SMTP密码解密接入
+    - `/api/v1/smtp/config/{tenant_id}/default` - 获取默认SMTP配置（含解密密码）
+    - `/api/v1/smtp/config/{tenant_id}/{setting_id}` - 获取特定SMTP配置
+    - `/api/v1/smtp/test` - 测试SMTP连接
+    """,
     version="2.0.0",
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
     docs_url="/docs",
@@ -157,6 +172,11 @@ app.include_router(
     email_router, prefix=f"{settings.API_V1_STR}/email", tags=["邮件服务"]
 )
 
+# 新增SMTP密码解密API路由
+app.include_router(
+    smtp_router, prefix=f"{settings.API_V1_STR}/smtp", tags=["SMTP配置与解密"]
+)
+
 # 根路径和健康检查
 
 
@@ -173,9 +193,15 @@ async def root():
             "邮件队列管理",
             "发送状态跟踪",
             "多租户支持",
+            "SMTP密码解密接入",  # 新增功能
         ],
-        "docs_url": "/docs",
-        "redoc_url": "/redoc",
+        "api_endpoints": {
+            "docs": "/docs",
+            "redoc": "/redoc",
+            "email_api": f"{settings.API_V1_STR}/email",
+            "smtp_api": f"{settings.API_V1_STR}/smtp",  # 新增
+        },
+        "smtp_decryption_guide": f"{settings.API_V1_STR}/smtp/usage/guide",  # 新增使用指南
     }
 
 
@@ -195,16 +221,26 @@ async def health_check():
             ATTACHMENT_DIR, os.W_OK
         )
 
+        # 检查SMTP密码解密功能
+        from .utils.security import smtp_password_manager
+
+        encryption_test = smtp_password_manager.test_encryption()
+
         return {
             "status": "healthy",
             "timestamp": time.time(),
             "services": {
                 "database": "connected",
                 "file_storage": "accessible" if upload_accessible else "error",
+                "smtp_encryption": "working" if encryption_test else "error",
             },
             "upload_directories": {
                 "attachments": str(ATTACHMENT_DIR),
                 "temp": str(TEMP_DIR),
+            },
+            "smtp_decryption": {
+                "status": "available",
+                "test_endpoint": f"{settings.API_V1_STR}/smtp/password/test",
             },
         }
     except Exception as e:
@@ -237,6 +273,12 @@ async def system_info():
             "upload_directory": str(ATTACHMENT_DIR),
             "max_file_size": "25MB",
             "max_attachments_per_email": 10,
+        },
+        "smtp_features": {
+            "password_encryption": "Fernet (AES 128)",
+            "supported_protocols": ["TLS", "SSL", "None"],
+            "decryption_api": "Available",
+            "api_prefix": f"{settings.API_V1_STR}/smtp",
         },
     }
 
@@ -292,6 +334,40 @@ async def get_system_limits():
             "auto_cleanup_enabled": True,
             "max_storage_per_tenant": "1GB",
         },
+        "smtp_decryption": {
+            "encryption_algorithm": "Fernet (AES 128)",
+            "key_derivation": "PBKDF2-SHA256 (100,000 iterations)",
+            "api_rate_limit": "No limit (configure as needed)",
+        },
+    }
+
+
+# SMTP密码解密快速访问端点
+@app.get("/smtp-info", tags=["系统"], summary="SMTP解密接入信息")
+async def smtp_decryption_info():
+    """SMTP密码解密接入信息"""
+    return {
+        "title": "SMTP密码解密接入",
+        "description": "为外部系统提供SMTP配置和密码解密服务",
+        "api_base": f"{settings.API_V1_STR}/smtp",
+        "key_endpoints": {
+            "get_default_config": f"{settings.API_V1_STR}/smtp/config/{{tenant_id}}/default",
+            "get_config_by_id": f"{settings.API_V1_STR}/smtp/config/{{tenant_id}}/{{setting_id}}",
+            "test_connection": f"{settings.API_V1_STR}/smtp/test",
+            "usage_guide": f"{settings.API_V1_STR}/smtp/usage/guide",
+        },
+        "security": {
+            "encryption": "Fernet对称加密",
+            "key_required": "ENCRYPTION_KEY环境变量",
+            "password_format": "Base64编码的加密数据",
+        },
+        "integration_steps": [
+            "1. 确保与邮件系统使用相同的ENCRYPTION_KEY",
+            "2. 调用配置API获取SMTP设置",
+            "3. 使用返回的明文密码进行SMTP连接",
+            "4. 可选：调用测试接口验证连接",
+        ],
+        "documentation": "/docs#/SMTP配置与解密",
     }
 
 
@@ -304,11 +380,21 @@ async def startup_event():
     logger.info("邮件API服务启动...")
     logger.info(f"上传目录: {ATTACHMENT_DIR}")
     logger.info(f"API文档: http://localhost:8000/docs")
+    logger.info(f"SMTP解密API: http://localhost:8000{settings.API_V1_STR}/smtp")
 
     # 确保必要的目录存在
     for directory in [ATTACHMENT_DIR, TEMP_DIR]:
         directory.mkdir(parents=True, exist_ok=True)
         logger.info(f"确保目录存在: {directory}")
+
+    # 测试SMTP密码加密功能
+    try:
+        from .utils.security import smtp_password_manager
+
+        test_result = smtp_password_manager.test_encryption()
+        logger.info(f"SMTP密码加密功能测试: {'正常' if test_result else '异常'}")
+    except Exception as e:
+        logger.error(f"SMTP密码加密功能测试失败: {str(e)}")
 
 
 @app.on_event("shutdown")
