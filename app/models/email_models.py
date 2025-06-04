@@ -97,8 +97,8 @@ class EmailSendingQueue(Base):
     related_project_id = Column(UUID(as_uuid=True))
     related_engineer_id = Column(UUID(as_uuid=True))
 
-    # 元数据和统计
-    metadata = Column(JSONB, default={})
+    # 元数据和统计 - 修改字段名避免与SQLAlchemy保留字冲突
+    email_metadata = Column(JSONB, default={})  # 原来的 metadata 改为 email_metadata
     send_duration_ms = Column(Integer)  # 发送耗时（毫秒）
 
     # 系统字段
