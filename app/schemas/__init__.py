@@ -28,9 +28,6 @@ from .email_schemas import (
     AttachmentListResponse,
     # 批量发送相关
     BulkEmailRequest,
-    # 模板相关
-    EmailTemplate,
-    EmailTemplateRenderRequest,
     # 统计相关
     EmailStatistics,
 )
@@ -53,9 +50,6 @@ __all__ = [
     "AttachmentListResponse",
     # 批量发送
     "BulkEmailRequest",
-    # 模板
-    "EmailTemplate",
-    "EmailTemplateRenderRequest",
     # 统计
     "EmailStatistics",
 ]
@@ -78,7 +72,7 @@ ATTACHMENT_SCHEMAS = [
     AttachmentListResponse,
 ]
 
-TEMPLATE_SCHEMAS = [EmailTemplate, EmailTemplateRenderRequest]
+BULK_SCHEMAS = [BulkEmailRequest]
 
 STATISTICS_SCHEMAS = [EmailStatistics]
 
@@ -87,6 +81,6 @@ SCHEMA_REGISTRY = {
     "smtp": SMTP_SCHEMAS,
     "email": EMAIL_SCHEMAS,
     "attachment": ATTACHMENT_SCHEMAS,
-    "template": TEMPLATE_SCHEMAS,
+    "bulk": BULK_SCHEMAS,
     "statistics": STATISTICS_SCHEMAS,
 }

@@ -155,6 +155,38 @@ class Settings(BaseSettings):
     MAX_CONCURRENT_SENDS: int = 10
     BATCH_SIZE: int = 50
 
+    # ========== 新增的配置项（解决Pydantic错误） ==========
+
+    # 健康检查配置
+    HEALTH_CHECK_INTERVAL: int = 30
+    HEALTH_CHECK_TIMEOUT: int = 10
+
+    # 存储配置
+    STORAGE_TYPE: str = "local"
+
+    # 项目信息
+    LICENSE: str = "MIT"
+    COPYRIGHT: str = "2024 Your Company Name"
+    CONTACT_EMAIL: str = "admin@yourdomain.com"
+
+    # 功能开关
+    FEATURE_EMAIL_TRACKING: bool = True
+    FEATURE_CLICK_TRACKING: bool = True
+    FEATURE_BULK_SEND: bool = True
+    FEATURE_TEMPLATES: bool = True
+    FEATURE_WEBHOOKS: bool = False
+
+    # API限制
+    API_RATE_LIMIT_PER_MINUTE: int = 60
+    API_BURST_LIMIT: int = 100
+
+    # 维护模式
+    MAINTENANCE_MODE: bool = False
+    MAINTENANCE_MESSAGE: str = "系统维护中，请稍后再试"
+
+    # 启动验证
+    VALIDATE_CONFIG_ON_STARTUP: bool = True
+
     # 安全头配置
     SECURITY_HEADERS: Dict[str, str] = {
         "X-Content-Type-Options": "nosniff",
@@ -305,30 +337,26 @@ class Settings(BaseSettings):
         env_file = ".env"
         env_file_encoding = "utf-8"
         case_sensitive = True
+        # 允许额外字段，避免Pydantic V2错误
+        extra = "allow"
 
         # 环境变量前缀
         env_prefix = ""
-
-        # 字段别名
-        fields = {
-            "DATABASE_URL": {"env": ["DATABASE_URL", "DB_URL", "POSTGRES_URL"]},
-            "SECRET_KEY": {"env": ["SECRET_KEY", "APP_SECRET_KEY"]},
-            "REDIS_URL": {"env": ["REDIS_URL", "REDIS_CONNECTION_STRING"]},
-        }
 
 
 # 创建全局设置实例
 settings = Settings()
 
-# 验证配置
-validation_errors = settings.validate_settings()
-if validation_errors:
-    import sys
+# 只在启用验证时进行配置验证
+if settings.VALIDATE_CONFIG_ON_STARTUP:
+    validation_errors = settings.validate_settings()
+    if validation_errors:
+        import sys
 
-    print("配置验证失败:")
-    for error in validation_errors:
-        print(f"  - {error}")
-    sys.exit(1)
+        print("配置验证失败:")
+        for error in validation_errors:
+            print(f"  - {error}")
+        sys.exit(1)
 
 # 创建必要的目录
 settings.create_directories()

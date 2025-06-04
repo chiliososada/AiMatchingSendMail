@@ -201,31 +201,6 @@ class BulkEmailRequest(BaseModel):
         return v
 
 
-class EmailTemplate(BaseModel):
-    """邮件模板"""
-
-    template_id: Optional[UUID] = None
-    name: str
-    subject_template: str
-    body_text_template: Optional[str] = None
-    body_html_template: Optional[str] = None
-    variables: Optional[List[str]] = Field(
-        default_factory=list, description="模板变量列表"
-    )
-    default_attachment_ids: Optional[List[UUID]] = Field(default_factory=list)
-
-
-class EmailTemplateRenderRequest(BaseModel):
-    """邮件模板渲染请求"""
-
-    template_id: UUID
-    variables: Dict[str, Any] = Field(default_factory=dict, description="模板变量值")
-    to_emails: List[EmailStr]
-    tenant_id: UUID
-    smtp_setting_id: Optional[UUID] = None
-    additional_attachment_ids: Optional[List[UUID]] = Field(default_factory=list)
-
-
 class AttachmentListResponse(BaseModel):
     """附件列表响应"""
 

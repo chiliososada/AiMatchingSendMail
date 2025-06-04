@@ -1,42 +1,49 @@
-# ==========================================
-# 邮件API系统 - 纯核心依赖
-# 只包含运行必需的包，最大程度避免冲突
-# ==========================================
-
 # 核心框架
-fastapi>=0.104.1
-"uvicorn[standard]">=0.24.0
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
 
-# 数据库
-sqlalchemy>=2.0.23
-psycopg2-binary>=2.9.7
+# 数据库相关
+sqlalchemy==2.0.23
+psycopg2-binary==2.9.9
+alembic==1.12.1
 
-# 数据验证
-pydantic>=2.5.0
-pydantic-settings>=2.0.3
+# 数据验证和设置
+pydantic==2.5.0
+pydantic-settings==2.1.0
+python-dotenv==1.0.0
 
-# 安全
-cryptography>=41.0.7
-"passlib[bcrypt]">=1.7.4
-
-# 配置
-python-dotenv>=1.0.0
+# 安全相关
+cryptography==41.0.7
+passlib[bcrypt]==1.7.4
 
 # 邮件发送
-aiosmtplib>=3.0.1
-email-validator>=2.1.0
+aiosmtplib==3.0.1
 
 # 文件上传
-python-multipart>=0.0.6
+python-multipart==0.0.6
 
-# 模板
-jinja2>=3.1.2
+# HTTP客户端
+httpx==0.25.2
 
-# 基础工具
-python-dateutil>=2.8.2
-pytz>=2023.3
+# 缓存 (可选)
+redis==5.0.1
 
-# ==========================================
-# 安装命令
-# ==========================================
-# pip install -r requirements-core.txt
+# 日志和监控
+structlog==23.2.0
+
+# 开发工具 (可选)
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-cov==4.1.0
+black==23.11.0
+isort==5.12.0
+mypy==1.7.1
+
+# 类型注解
+typing-extensions==4.8.0
+
+# 时间处理
+python-dateutil==2.8.2
+
+# UUID生成
+uuid==1.30
