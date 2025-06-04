@@ -1,7 +1,7 @@
 # 忽略环境变量文件
 .env
 .env.*
-
+venv/
 # 忽略 Node.js 依赖（如果使用 Node）
 node_modules/
 
