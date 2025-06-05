@@ -16,6 +16,7 @@ from .api.email_routes import router as email_router
 from .api.smtp_routes import router as smtp_router
 from .database import db_manager, health_check as db_health_check
 
+
 # 配置日志
 logging.basicConfig(
     level=logging.INFO,
@@ -31,6 +32,7 @@ TEMP_DIR = UPLOAD_DIR / "temp"
 
 for directory in [UPLOAD_DIR, ATTACHMENT_DIR, TEMP_DIR]:
     directory.mkdir(parents=True, exist_ok=True)
+
 
 # 创建FastAPI应用
 app = FastAPI(

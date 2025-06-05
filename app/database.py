@@ -23,6 +23,7 @@ async def create_database_pool() -> asyncpg.Pool:
     try:
         # 解析数据库URL database_url = settings.DATABASE_URL
         database_url = settings.DATABASE_URL
+        # logger.info(settings.DATABASE_URL)
         # database_url = "postgresql://postgres.utkxuvldiveojhnzfsca:1994Lzy.@aws-0-ap-northeast-1.pooler.supabase.com:5432/postgres"
         # if database_url.startswith("postgresql://"):
         #     database_url = database_url.replace("postgresql://", "postgres://", 1)
