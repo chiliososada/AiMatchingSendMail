@@ -14,7 +14,6 @@ import asyncio
 from .config import settings
 from .api.email_routes import router as email_router
 from .api.smtp_routes import router as smtp_router
-from .api.diagnostic_routes import router as diagnostic_router
 from .database import db_manager, health_check as db_health_check
 
 # 配置日志
@@ -183,10 +182,6 @@ app.include_router(
 
 app.include_router(
     smtp_router, prefix=f"{settings.API_V1_STR}/smtp", tags=["SMTP配置与解密"]
-)
-
-app.include_router(
-    diagnostic_router, prefix=f"{settings.API_V1_STR}/diagnostic", tags=["邮件诊断"]
 )
 
 # 根路径和健康检查

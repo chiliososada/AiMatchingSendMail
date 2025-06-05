@@ -21,10 +21,11 @@ async def create_database_pool() -> asyncpg.Pool:
         return _pool
 
     try:
-        # 解析数据库URL
+        # 解析数据库URL database_url = settings.DATABASE_URL
         database_url = settings.DATABASE_URL
-        if database_url.startswith("postgresql://"):
-            database_url = database_url.replace("postgresql://", "postgres://", 1)
+        # database_url = "postgresql://postgres.utkxuvldiveojhnzfsca:1994Lzy.@aws-0-ap-northeast-1.pooler.supabase.com:5432/postgres"
+        # if database_url.startswith("postgresql://"):
+        #     database_url = database_url.replace("postgresql://", "postgres://", 1)
 
         logger.info(f"正在创建数据库连接池...")
 
@@ -160,7 +161,7 @@ class DatabaseManager:
             deleted_at TIMESTAMP WITH TIME ZONE
         );
 
-        -- 创建邮件发送队列表（移除外键约束）
+        -- 创建邮件发送队列表
         CREATE TABLE IF NOT EXISTS email_sending_queue (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             tenant_id UUID NOT NULL,
@@ -171,7 +172,7 @@ class DatabaseManager:
             body_text TEXT,
             body_html TEXT,
             attachments JSONB DEFAULT '{}',
-            smtp_setting_id UUID,  -- 移除外键约束，只保留引用
+            smtp_setting_id UUID REFERENCES email_smtp_settings(id),
             template_id UUID,
             priority INTEGER DEFAULT 5,
             scheduled_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -181,8 +182,8 @@ class DatabaseManager:
             sent_at TIMESTAMP WITH TIME ZONE,
             last_attempt_at TIMESTAMP WITH TIME ZONE,
             error_message TEXT,
-            related_project_id UUID,    -- 移除外键约束，只保留字段
-            related_engineer_id UUID,   -- 移除外键约束，只保留字段
+            related_project_id UUID,
+            related_engineer_id UUID,
             email_metadata JSONB DEFAULT '{}',
             send_duration_ms INTEGER,
             created_by UUID,
@@ -190,10 +191,10 @@ class DatabaseManager:
             updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
         );
 
-        -- 创建邮件发送日志表（移除外键约束）
+        -- 创建邮件发送日志表
         CREATE TABLE IF NOT EXISTS email_sending_logs (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            queue_id UUID,  -- 移除外键约束，只保留引用
+            queue_id UUID REFERENCES email_sending_queue(id),
             tenant_id UUID NOT NULL,
             message_id VARCHAR,
             smtp_response TEXT,
@@ -213,13 +214,12 @@ class DatabaseManager:
             logged_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
         );
 
-        -- 创建索引（保持性能）
+        -- 创建索引
         CREATE INDEX IF NOT EXISTS idx_smtp_settings_tenant_id ON email_smtp_settings(tenant_id);
         CREATE INDEX IF NOT EXISTS idx_smtp_settings_is_default ON email_smtp_settings(tenant_id, is_default);
         CREATE INDEX IF NOT EXISTS idx_queue_tenant_id ON email_sending_queue(tenant_id);
         CREATE INDEX IF NOT EXISTS idx_queue_status ON email_sending_queue(status);
         CREATE INDEX IF NOT EXISTS idx_queue_created_at ON email_sending_queue(created_at);
-        CREATE INDEX IF NOT EXISTS idx_queue_smtp_setting ON email_sending_queue(smtp_setting_id);
         CREATE INDEX IF NOT EXISTS idx_logs_tenant_id ON email_sending_logs(tenant_id);
         CREATE INDEX IF NOT EXISTS idx_logs_queue_id ON email_sending_logs(queue_id);
         """
