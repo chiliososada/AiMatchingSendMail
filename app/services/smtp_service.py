@@ -1,4 +1,4 @@
-# app/services/smtp_service.py
+# app/services/smtp_service.py - 移除SQLAlchemy引用
 import aiosmtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -10,14 +10,13 @@ from email import encoders
 import ssl
 import os
 import mimetypes
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 from pathlib import Path
 import logging
 import asyncio
 from datetime import datetime
 
 from ..utils.security import decrypt_password, smtp_password_manager
-from ..models.email_models import EmailSMTPSettings
 from ..schemas.email_schemas import AttachmentInfo
 
 logger = logging.getLogger(__name__)
@@ -26,12 +25,12 @@ logger = logging.getLogger(__name__)
 class SMTPService:
     """增强版SMTP服务 - 支持完整的密码解密和连接管理"""
 
-    def __init__(self, smtp_settings: EmailSMTPSettings):
+    def __init__(self, smtp_settings: Any):
         """
         初始化SMTP服务
 
         Args:
-            smtp_settings: SMTP配置设置
+            smtp_settings: SMTP配置设置对象或字典
         """
         self.settings = smtp_settings
         self._smtp_password = None
@@ -53,6 +52,7 @@ class SMTPService:
             str: 解密后的明文密码
         """
         try:
+            # 修复：使用属性访问而不是字典访问
             encrypted_password = self.settings.smtp_password_encrypted
 
             if not encrypted_password:
@@ -301,7 +301,7 @@ class SMTPService:
             # 设置邮件头
             msg["From"] = (
                 f"{self.settings.from_name} <{self.settings.from_email}>"
-                if self.settings.from_name
+                if getattr(self.settings, "from_name", None)
                 else self.settings.from_email
             )
             msg["To"] = ", ".join(to_emails)
@@ -313,7 +313,7 @@ class SMTPService:
             if bcc_emails:
                 msg["Bcc"] = ", ".join(bcc_emails)
 
-            if self.settings.reply_to_email:
+            if getattr(self.settings, "reply_to_email", None):
                 msg["Reply-To"] = self.settings.reply_to_email
 
             # 添加附件
@@ -423,138 +423,6 @@ class SMTPService:
                 "error_type": "general_error",
             }
 
-    async def send_bulk_emails(
-        self,
-        email_list: List[Dict[str, Any]],
-        common_attachments: Optional[List[AttachmentInfo]] = None,
-        attachment_paths: Optional[Dict[str, str]] = None,
-        batch_size: int = 10,  # 批处理大小
-    ) -> Dict[str, Any]:
-        """
-        批量发送邮件（支持批处理和并发控制）
-
-        Args:
-            email_list: 邮件列表
-            common_attachments: 公共附件
-            attachment_paths: 附件路径映射
-            batch_size: 批处理大小
-
-        Returns:
-            Dict: 批量发送结果
-        """
-        results = {
-            "total": len(email_list),
-            "success": 0,
-            "failed": 0,
-            "errors": [],
-            "batch_results": [],
-            "start_time": datetime.utcnow().isoformat(),
-        }
-
-        # 分批处理邮件
-        for batch_index in range(0, len(email_list), batch_size):
-            batch = email_list[batch_index : batch_index + batch_size]
-            batch_results = {"batch_index": batch_index // batch_size, "results": []}
-
-            # 并发发送批次中的邮件
-            tasks = []
-            for i, email_data in enumerate(batch):
-                global_index = batch_index + i
-                tasks.append(
-                    self._send_single_email_in_batch(
-                        email_data, global_index, common_attachments, attachment_paths
-                    )
-                )
-
-            # 等待批次完成
-            batch_send_results = await asyncio.gather(*tasks, return_exceptions=True)
-
-            # 处理批次结果
-            for result in batch_send_results:
-                if isinstance(result, Exception):
-                    results["failed"] += 1
-                    results["errors"].append(
-                        {
-                            "index": len(batch_results["results"]),
-                            "error": str(result),
-                            "type": "exception",
-                        }
-                    )
-                elif result["status"] == "success":
-                    results["success"] += 1
-                else:
-                    results["failed"] += 1
-                    results["errors"].append(result)
-
-                batch_results["results"].append(result)
-
-            results["batch_results"].append(batch_results)
-
-            # 批次间短暂延迟，避免过载
-            if batch_index + batch_size < len(email_list):
-                await asyncio.sleep(0.1)
-
-        results["end_time"] = datetime.utcnow().isoformat()
-        results["success_rate"] = (
-            (results["success"] / results["total"] * 100) if results["total"] > 0 else 0
-        )
-
-        return results
-
-    async def _send_single_email_in_batch(
-        self,
-        email_data: Dict[str, Any],
-        index: int,
-        common_attachments: Optional[List[AttachmentInfo]] = None,
-        attachment_paths: Optional[Dict[str, str]] = None,
-    ) -> Dict[str, Any]:
-        """
-        批量发送中的单个邮件处理
-
-        Args:
-            email_data: 单个邮件数据
-            index: 邮件在批次中的索引
-            common_attachments: 公共附件
-            attachment_paths: 附件路径映射
-
-        Returns:
-            Dict: 单个邮件发送结果
-        """
-        try:
-            # 合并公共附件和个人附件
-            email_attachments = list(common_attachments) if common_attachments else []
-            if "attachments" in email_data:
-                email_attachments.extend(email_data["attachments"])
-
-            result = await self.send_email(
-                to_emails=[email_data["to_email"]],
-                subject=email_data.get("subject", ""),
-                body_text=email_data.get("body_text"),
-                body_html=email_data.get("body_html"),
-                attachments=email_attachments if email_attachments else None,
-                attachment_paths=attachment_paths,
-                cc_emails=email_data.get("cc_emails"),
-                bcc_emails=email_data.get("bcc_emails"),
-            )
-
-            return {
-                "index": index,
-                "email": email_data["to_email"],
-                "status": result["status"],
-                "message": result.get("message", ""),
-                "message_id": result.get("message_id", ""),
-                "send_duration": result.get("send_duration_seconds", 0),
-            }
-
-        except Exception as e:
-            return {
-                "index": index,
-                "email": email_data.get("to_email", "Unknown"),
-                "status": "failed",
-                "error": str(e),
-                "error_type": "batch_send_exception",
-            }
-
     async def test_connection(self) -> dict:
         """
         测试SMTP连接
@@ -630,61 +498,6 @@ class SMTPService:
                 "error_type": "general_error",
                 "test_time": datetime.utcnow().isoformat(),
             }
-
-    def get_supported_file_types(self) -> Dict[str, List[str]]:
-        """获取支持的文件类型"""
-        return {
-            "documents": [
-                ".pdf",
-                ".doc",
-                ".docx",
-                ".xls",
-                ".xlsx",
-                ".ppt",
-                ".pptx",
-                ".txt",
-                ".rtf",
-            ],
-            "images": [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".svg"],
-            "archives": [".zip", ".rar", ".7z", ".tar", ".gz"],
-            "others": [".csv", ".json", ".xml", ".log"],
-        }
-
-    def validate_file_type(self, filename: str) -> bool:
-        """验证文件类型是否支持"""
-        supported_types = self.get_supported_file_types()
-        file_ext = Path(filename).suffix.lower()
-
-        for category, extensions in supported_types.items():
-            if file_ext in extensions:
-                return True
-
-        return False
-
-    def get_smtp_info(self) -> Dict[str, Any]:
-        """
-        获取SMTP配置信息（不包含敏感信息）
-
-        Returns:
-            Dict: SMTP配置信息
-        """
-        return {
-            "setting_id": str(self.settings.id),
-            "setting_name": self.settings.setting_name,
-            "smtp_host": self.settings.smtp_host,
-            "smtp_port": self.settings.smtp_port,
-            "smtp_username": self.settings.smtp_username,
-            "security_protocol": self.settings.security_protocol,
-            "from_email": self.settings.from_email,
-            "from_name": self.settings.from_name,
-            "reply_to_email": self.settings.reply_to_email,
-            "daily_send_limit": self.settings.daily_send_limit,
-            "hourly_send_limit": self.settings.hourly_send_limit,
-            "is_default": self.settings.is_default,
-            "connection_status": self.settings.connection_status,
-            "connection_verified": self._connection_verified,
-            "password_decrypted": bool(self._smtp_password),
-        }
 
     async def send_test_email(
         self, test_email: str, custom_subject: str = None

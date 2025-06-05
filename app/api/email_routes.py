@@ -1,4 +1,4 @@
-# app/api/email_routes.py
+# app/api/email_routes.py - asyncpg版本
 """
 邮件发送API路由 - 完整版
 包含邮件发送、附件管理、队列管理、统计等完整功能
@@ -6,7 +6,6 @@
 
 from fastapi import (
     APIRouter,
-    Depends,
     HTTPException,
     status,
     UploadFile,
@@ -16,7 +15,6 @@ from fastapi import (
     BackgroundTasks,
 )
 from fastapi.responses import JSONResponse
-from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 from uuid import UUID
 import logging
@@ -24,7 +22,6 @@ from datetime import datetime
 import os
 from pathlib import Path
 
-from ..database import get_db
 from ..services.email_service import EmailService
 from ..schemas.email_schemas import (
     EmailSendRequest,
@@ -50,29 +47,27 @@ router = APIRouter()
 
 
 @router.post("/smtp-settings", response_model=SMTPSettingsResponse)
-async def create_smtp_settings(
-    smtp_data: SMTPSettingsCreate, db: Session = Depends(get_db)
-):
+async def create_smtp_settings(smtp_data: SMTPSettingsCreate):
     """创建SMTP配置"""
     try:
-        email_service = EmailService(db)
-        smtp_settings = email_service.create_smtp_settings(smtp_data)
+        email_service = EmailService()
+        smtp_settings = await email_service.create_smtp_settings(smtp_data)
 
         return SMTPSettingsResponse(
-            id=smtp_settings.id,
-            tenant_id=smtp_settings.tenant_id,
-            setting_name=smtp_settings.setting_name,
-            smtp_host=smtp_settings.smtp_host,
-            smtp_port=smtp_settings.smtp_port,
-            smtp_username=smtp_settings.smtp_username,
-            security_protocol=smtp_settings.security_protocol,
-            from_email=smtp_settings.from_email,
-            from_name=smtp_settings.from_name,
-            reply_to_email=smtp_settings.reply_to_email,
-            connection_status=smtp_settings.connection_status,
-            is_default=smtp_settings.is_default,
-            is_active=smtp_settings.is_active,
-            created_at=smtp_settings.created_at,
+            id=smtp_settings["id"],
+            tenant_id=smtp_settings["tenant_id"],
+            setting_name=smtp_settings["setting_name"],
+            smtp_host=smtp_settings["smtp_host"],
+            smtp_port=smtp_settings["smtp_port"],
+            smtp_username=smtp_settings["smtp_username"],
+            security_protocol=smtp_settings["security_protocol"],
+            from_email=smtp_settings["from_email"],
+            from_name=smtp_settings["from_name"],
+            reply_to_email=smtp_settings["reply_to_email"],
+            connection_status=smtp_settings["connection_status"],
+            is_default=smtp_settings["is_default"],
+            is_active=smtp_settings["is_active"],
+            created_at=smtp_settings["created_at"],
         )
 
     except Exception as e:
@@ -84,30 +79,30 @@ async def create_smtp_settings(
 
 
 @router.get("/smtp-settings/{tenant_id}", response_model=List[SMTPSettingsResponse])
-async def get_smtp_settings_list(tenant_id: UUID, db: Session = Depends(get_db)):
+async def get_smtp_settings_list(tenant_id: UUID):
     """获取租户的SMTP设置列表"""
     try:
-        email_service = EmailService(db)
-        settings_list = email_service.get_smtp_settings_list(tenant_id)
+        email_service = EmailService()
+        settings_list = await email_service.get_smtp_settings_list(tenant_id)
 
         return [
             SMTPSettingsResponse(
-                id=settings.id,
-                tenant_id=settings.tenant_id,
-                setting_name=settings.setting_name,
-                smtp_host=settings.smtp_host,
-                smtp_port=settings.smtp_port,
-                smtp_username=settings.smtp_username,
-                security_protocol=settings.security_protocol,
-                from_email=settings.from_email,
-                from_name=settings.from_name,
-                reply_to_email=settings.reply_to_email,
-                connection_status=settings.connection_status,
-                is_default=settings.is_default,
-                is_active=settings.is_active,
-                created_at=settings.created_at,
+                id=settings_item["id"],
+                tenant_id=settings_item["tenant_id"],
+                setting_name=settings_item["setting_name"],
+                smtp_host=settings_item["smtp_host"],
+                smtp_port=settings_item["smtp_port"],
+                smtp_username=settings_item["smtp_username"],
+                security_protocol=settings_item["security_protocol"],
+                from_email=settings_item["from_email"],
+                from_name=settings_item["from_name"],
+                reply_to_email=settings_item["reply_to_email"],
+                connection_status=settings_item["connection_status"],
+                is_default=settings_item["is_default"],
+                is_active=settings_item["is_active"],
+                created_at=settings_item["created_at"],
             )
-            for settings in settings_list
+            for settings_item in settings_list
         ]
 
     except Exception as e:
@@ -119,12 +114,10 @@ async def get_smtp_settings_list(tenant_id: UUID, db: Session = Depends(get_db))
 
 
 @router.post("/smtp-settings/test")
-async def test_smtp_connection(
-    test_request: EmailTestRequest, db: Session = Depends(get_db)
-):
+async def test_smtp_connection(test_request: EmailTestRequest):
     """测试SMTP连接"""
     try:
-        email_service = EmailService(db)
+        email_service = EmailService()
         result = await email_service.test_smtp_connection(
             test_request.tenant_id, test_request.smtp_setting_id
         )
@@ -145,7 +138,6 @@ async def test_smtp_connection(
 async def upload_attachment(
     tenant_id: UUID = Form(...),
     file: UploadFile = File(...),
-    db: Session = Depends(get_db),
 ):
     """上传单个附件"""
     try:
@@ -169,7 +161,7 @@ async def upload_attachment(
             )
 
         # 保存附件
-        email_service = EmailService(db)
+        email_service = EmailService()
         attachment_info, attachment_id = email_service.save_attachment(
             file_content, file.filename, tenant_id, file.content_type
         )
@@ -199,7 +191,6 @@ async def upload_attachment(
 async def upload_multiple_attachments(
     tenant_id: UUID = Form(...),
     files: List[UploadFile] = File(...),
-    db: Session = Depends(get_db),
 ):
     """批量上传附件"""
     try:
@@ -243,7 +234,7 @@ async def upload_multiple_attachments(
                     continue
 
                 # 保存附件
-                email_service = EmailService(db)
+                email_service = EmailService()
                 attachment_info, attachment_id = email_service.save_attachment(
                     file_content, file.filename, tenant_id, file.content_type
                 )
@@ -289,11 +280,10 @@ async def delete_attachment(
     tenant_id: UUID,
     attachment_id: UUID,
     filename: str = Query(..., description="文件名"),
-    db: Session = Depends(get_db),
 ):
     """删除附件"""
     try:
-        email_service = EmailService(db)
+        email_service = EmailService()
         success = email_service.delete_attachment(tenant_id, attachment_id, filename)
 
         if success:
@@ -314,10 +304,10 @@ async def delete_attachment(
 
 
 @router.get("/attachments/{tenant_id}", response_model=AttachmentListResponse)
-async def get_attachments_list(tenant_id: UUID, db: Session = Depends(get_db)):
+async def get_attachments_list(tenant_id: UUID):
     """获取租户的附件列表"""
     try:
-        email_service = EmailService(db)
+        email_service = EmailService()
         storage_usage = email_service.attachment_manager.get_tenant_storage_usage(
             tenant_id
         )
@@ -353,11 +343,10 @@ async def get_attachments_list(tenant_id: UUID, db: Session = Depends(get_db)):
 async def send_email(
     email_request: EmailSendRequest,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
 ):
     """发送普通邮件"""
     try:
-        email_service = EmailService(db)
+        email_service = EmailService()
         result = await email_service.send_email_immediately(email_request)
 
         return EmailSendResponse(
@@ -381,11 +370,10 @@ async def send_email(
 async def send_email_with_attachments(
     email_request: EmailWithAttachmentsRequest,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
 ):
     """发送带附件的邮件"""
     try:
-        email_service = EmailService(db)
+        email_service = EmailService()
         result = await email_service.send_email_with_attachments(email_request)
 
         return EmailSendResponse(
@@ -405,41 +393,11 @@ async def send_email_with_attachments(
         )
 
 
-@router.post("/send-bulk")
-async def send_bulk_emails(
-    bulk_request: BulkEmailRequest,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
-):
-    """批量发送邮件"""
-    try:
-        email_service = EmailService(db)
-        result = await email_service.send_bulk_emails(bulk_request)
-
-        return {
-            "status": result["status"],
-            "total_emails": result["total_emails"],
-            "successful_sends": result["successful_sends"],
-            "failed_sends": result["failed_sends"],
-            "success_rate": result["success_rate"],
-            "message": f"批量发送完成，成功{result['successful_sends']}封，失败{result['failed_sends']}封",
-        }
-
-    except Exception as e:
-        logger.error(f"批量发送邮件失败: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"批量发送失败: {str(e)}",
-        )
-
-
 @router.post("/send-test")
-async def send_test_email(
-    test_request: EmailTestRequest, db: Session = Depends(get_db)
-):
+async def send_test_email(test_request: EmailTestRequest):
     """发送测试邮件"""
     try:
-        email_service = EmailService(db)
+        email_service = EmailService()
         result = await email_service.send_test_email(
             test_request.tenant_id,
             test_request.smtp_setting_id,
@@ -460,13 +418,11 @@ async def send_test_email(
 
 
 @router.get("/queue/{tenant_id}/{queue_id}", response_model=EmailStatusResponse)
-async def get_email_status(
-    tenant_id: UUID, queue_id: UUID, db: Session = Depends(get_db)
-):
+async def get_email_status(tenant_id: UUID, queue_id: UUID):
     """获取邮件发送状态"""
     try:
-        email_service = EmailService(db)
-        queue_item = email_service.get_email_queue_status(tenant_id, queue_id)
+        email_service = EmailService()
+        queue_item = await email_service.get_email_queue_status(tenant_id, queue_id)
 
         if not queue_item:
             raise HTTPException(
@@ -475,8 +431,8 @@ async def get_email_status(
 
         # 解析附件信息
         attachments_info = []
-        if queue_item.attachments and isinstance(queue_item.attachments, dict):
-            attachments_data = queue_item.attachments.get("attachments", [])
+        if queue_item["attachments"] and isinstance(queue_item["attachments"], dict):
+            attachments_data = queue_item["attachments"].get("attachments", [])
             for att in attachments_data:
                 attachments_info.append(
                     {
@@ -487,13 +443,13 @@ async def get_email_status(
                 )
 
         return EmailStatusResponse(
-            id=queue_item.id,
-            to_emails=queue_item.to_emails,
-            subject=queue_item.subject,
-            status=queue_item.status,
-            created_at=queue_item.created_at,
-            sent_at=queue_item.sent_at,
-            error_message=queue_item.error_message,
+            id=queue_item["id"],
+            to_emails=queue_item["to_emails"],
+            subject=queue_item["subject"],
+            status=queue_item["status"],
+            created_at=queue_item["created_at"],
+            sent_at=queue_item["sent_at"],
+            error_message=queue_item["error_message"],
             attachments_info=attachments_info,
         )
 
@@ -512,38 +468,39 @@ async def get_email_queue_list(
     tenant_id: UUID,
     limit: int = Query(50, ge=1, le=100, description="每页数量"),
     offset: int = Query(0, ge=0, description="偏移量"),
-    db: Session = Depends(get_db),
 ):
     """获取邮件队列列表"""
     try:
-        email_service = EmailService(db)
-        queue_list = email_service.get_email_queue_list(tenant_id, limit, offset)
+        email_service = EmailService()
+        queue_list = await email_service.get_email_queue_list(tenant_id, limit, offset)
 
         result = []
         for item in queue_list:
             # 解析附件信息
             attachment_count = 0
-            if item.attachments and isinstance(item.attachments, dict):
-                attachment_count = item.attachments.get("attachment_count", 0)
+            if item["attachments"] and isinstance(item["attachments"], dict):
+                attachment_count = item["attachments"].get("attachment_count", 0)
 
             result.append(
                 {
-                    "id": item.id,
-                    "to_emails": item.to_emails,
-                    "subject": item.subject,
-                    "status": item.status,
-                    "priority": item.priority,
+                    "id": item["id"],
+                    "to_emails": item["to_emails"],
+                    "subject": item["subject"],
+                    "status": item["status"],
+                    "priority": item["priority"],
                     "created_at": (
-                        item.created_at.isoformat() if item.created_at else None
+                        item["created_at"].isoformat() if item["created_at"] else None
                     ),
-                    "sent_at": item.sent_at.isoformat() if item.sent_at else None,
+                    "sent_at": item["sent_at"].isoformat() if item["sent_at"] else None,
                     "scheduled_at": (
-                        item.scheduled_at.isoformat() if item.scheduled_at else None
+                        item["scheduled_at"].isoformat()
+                        if item["scheduled_at"]
+                        else None
                     ),
                     "attachment_count": attachment_count,
-                    "send_duration_ms": item.send_duration_ms,
-                    "error_message": item.error_message,
-                    "retry_count": item.current_retry_count,
+                    "send_duration_ms": item["send_duration_ms"],
+                    "error_message": item["error_message"],
+                    "retry_count": item["current_retry_count"],
                 }
             )
 
@@ -570,12 +527,11 @@ async def get_email_queue_list(
 async def get_email_statistics(
     tenant_id: UUID,
     days: int = Query(30, ge=1, le=365, description="统计天数"),
-    db: Session = Depends(get_db),
 ):
     """获取邮件发送统计"""
     try:
-        email_service = EmailService(db)
-        stats = email_service.get_email_statistics(tenant_id, days)
+        email_service = EmailService()
+        stats = await email_service.get_email_statistics(tenant_id, days)
 
         return EmailStatistics(
             total_sent=stats["total_sent"],
@@ -606,11 +562,10 @@ async def get_email_statistics(
 async def cleanup_tenant_attachments(
     tenant_id: UUID,
     days: int = Query(7, ge=1, le=365, description="清理多少天前的文件"),
-    db: Session = Depends(get_db),
 ):
     """清理租户的过期附件"""
     try:
-        email_service = EmailService(db)
+        email_service = EmailService()
         cleanup_count = email_service.cleanup_old_attachments(tenant_id, days)
 
         return {
@@ -629,10 +584,10 @@ async def cleanup_tenant_attachments(
 
 
 @router.get("/maintenance/storage-usage/{tenant_id}")
-async def get_storage_usage(tenant_id: UUID, db: Session = Depends(get_db)):
+async def get_storage_usage(tenant_id: UUID):
     """获取存储使用情况"""
     try:
-        email_service = EmailService(db)
+        email_service = EmailService()
         usage = email_service.attachment_manager.get_tenant_storage_usage(tenant_id)
 
         return {
@@ -661,6 +616,7 @@ async def get_system_info():
     return {
         "service": "邮件发送API",
         "version": "2.0.0",
+        "database": "asyncpg连接池",
         "supported_features": [
             "SMTP配置管理",
             "单发邮件",
@@ -669,6 +625,7 @@ async def get_system_info():
             "邮件队列",
             "状态跟踪",
             "统计分析",
+            "高性能异步数据库访问",
         ],
         "limits": {
             "max_file_size_mb": settings.MAX_FILE_SIZE / 1024 / 1024,
@@ -686,11 +643,13 @@ async def get_system_info():
 
 
 @router.get("/system/health")
-async def health_check(db: Session = Depends(get_db)):
+async def health_check():
     """健康检查"""
     try:
         # 测试数据库连接
-        db.execute("SELECT 1")
+        from ..database import check_database_connection
+
+        db_connected = await check_database_connection()
 
         # 检查上传目录
         upload_dir = Path(settings.ATTACHMENT_DIR)
@@ -699,7 +658,8 @@ async def health_check(db: Session = Depends(get_db)):
         return {
             "status": "healthy",
             "timestamp": datetime.utcnow().isoformat(),
-            "database": "connected",
+            "database": "connected" if db_connected else "error",
+            "database_type": "asyncpg连接池",
             "storage": "accessible" if upload_accessible else "error",
             "upload_directory": str(upload_dir),
         }

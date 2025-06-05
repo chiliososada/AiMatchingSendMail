@@ -1,4 +1,4 @@
-# app/main.py
+# app/main.py - asyncpg版本
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -9,11 +9,13 @@ import logging
 import time
 from pathlib import Path
 import os
+import asyncio
 
 from .config import settings
 from .api.email_routes import router as email_router
-from .api.smtp_routes import router as smtp_router  # 修复：确保导入SMTP路由
-from .database import engine, Base
+from .api.smtp_routes import router as smtp_router
+from .api.diagnostic_routes import router as diagnostic_router
+from .database import db_manager, health_check as db_health_check
 
 # 配置日志
 logging.basicConfig(
@@ -22,9 +24,6 @@ logging.basicConfig(
     handlers=[logging.FileHandler("app.log"), logging.StreamHandler()],
 )
 logger = logging.getLogger(__name__)
-
-# 创建数据库表
-Base.metadata.create_all(bind=engine)
 
 # 创建上传目录
 UPLOAD_DIR = Path("uploads")
@@ -57,6 +56,10 @@ app = FastAPI(
     - 与aimachingmail项目使用相同的密钥派生算法（SHA256）
     - 支持多种密码存储格式（hex、base64、bytes）
     - 完全向后兼容现有的加密数据
+    
+    ## 数据库
+    - 使用asyncpg连接池提供高性能异步数据库访问
+    - 支持连接池管理和自动重连
     """,
     version="2.0.0",
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
@@ -178,9 +181,12 @@ app.include_router(
     email_router, prefix=f"{settings.API_V1_STR}/email", tags=["邮件服务"]
 )
 
-# 修复：确保包含SMTP密码解密API路由
 app.include_router(
     smtp_router, prefix=f"{settings.API_V1_STR}/smtp", tags=["SMTP配置与解密"]
+)
+
+app.include_router(
+    diagnostic_router, prefix=f"{settings.API_V1_STR}/diagnostic", tags=["邮件诊断"]
 )
 
 # 根路径和健康检查
@@ -192,6 +198,7 @@ async def root():
     return {
         "message": "邮件发送API服务正在运行",
         "version": "2.0.0",
+        "database": "asyncpg连接池",
         "compatibility": "与aimachingmail项目完全兼容",
         "features": [
             "SMTP配置管理",
@@ -201,6 +208,7 @@ async def root():
             "发送状态跟踪",
             "多租户支持",
             "SMTP密码解密接入（兼容aimachingmail）",
+            "高性能异步数据库访问",
         ],
         "api_endpoints": {
             "docs": "/docs",
@@ -220,12 +228,8 @@ async def root():
 async def health_check():
     """健康检查"""
     try:
-        # 检查数据库连接
-        from .database import SessionLocal
-
-        db = SessionLocal()
-        db.execute("SELECT 1")
-        db.close()
+        # 检查数据库连接池
+        db_health = await db_health_check()
 
         # 检查上传目录
         upload_accessible = ATTACHMENT_DIR.exists() and os.access(
@@ -240,12 +244,15 @@ async def health_check():
         return {
             "status": "healthy",
             "timestamp": time.time(),
+            "database": "asyncpg连接池",
             "compatibility": "aimachingmail项目兼容",
             "services": {
-                "database": "connected",
+                "database_pool": db_health.get("status", "unknown"),
                 "file_storage": "accessible" if upload_accessible else "error",
                 "smtp_encryption": "working" if encryption_test else "error",
             },
+            "database_info": db_health.get("database_info", {}),
+            "connection_pool": db_health.get("connection_pool", {}),
             "upload_directories": {
                 "attachments": str(ATTACHMENT_DIR),
                 "temp": str(TEMP_DIR),
@@ -265,7 +272,7 @@ async def health_check():
                 "status": "unhealthy",
                 "error": str(e),
                 "timestamp": time.time(),
-                "suggestion": "检查数据库连接和ENCRYPTION_KEY配置",
+                "suggestion": "检查数据库连接池和ENCRYPTION_KEY配置",
             },
         )
 
@@ -281,6 +288,7 @@ async def system_info():
             "name": settings.PROJECT_NAME,
             "version": "2.0.0",
             "api_version": settings.API_V1_STR,
+            "database": "asyncpg连接池",
             "compatibility": "与aimachingmail项目完全兼容",
         },
         "system": {
@@ -293,6 +301,8 @@ async def system_info():
             "upload_directory": str(ATTACHMENT_DIR),
             "max_file_size": "25MB",
             "max_attachments_per_email": 10,
+            "database_pool_size": settings.DATABASE_POOL_SIZE,
+            "database_max_overflow": settings.DATABASE_MAX_OVERFLOW,
         },
         "smtp_features": {
             "password_encryption": "Fernet (AES 128)",
@@ -305,127 +315,19 @@ async def system_info():
     }
 
 
-@app.get("/limits", tags=["系统"])
-async def get_system_limits():
-    """获取系统限制信息"""
-    return {
-        "file_upload": {
-            "max_file_size": "25MB",
-            "max_files_per_request": 10,
-            "max_total_request_size": "100MB",
-            "supported_extensions": [
-                ".pdf",
-                ".doc",
-                ".docx",
-                ".xls",
-                ".xlsx",
-                ".ppt",
-                ".pptx",
-                ".jpg",
-                ".jpeg",
-                ".png",
-                ".gif",
-                ".bmp",
-                ".svg",
-                ".zip",
-                ".rar",
-                ".7z",
-                ".txt",
-                ".csv",
-                ".json",
-            ],
-            "forbidden_extensions": [
-                ".exe",
-                ".bat",
-                ".cmd",
-                ".scr",
-                ".pif",
-                ".com",
-                ".vbs",
-                ".js",
-            ],
-        },
-        "email_sending": {
-            "max_recipients_per_email": 100,
-            "max_bulk_emails": 1000,
-            "max_retry_attempts": 3,
-            "supported_protocols": ["TLS", "SSL", "None"],
-        },
-        "storage": {
-            "attachment_retention_hours": 24,
-            "auto_cleanup_enabled": True,
-            "max_storage_per_tenant": "1GB",
-        },
-        "smtp_decryption": {
-            "encryption_algorithm": "Fernet (AES 128)",
-            "key_derivation": "SHA256 (与aimachingmail一致)",
-            "supported_formats": ["hex", "base64", "bytes"],
-            "api_rate_limit": "No limit (configure as needed)",
-            "compatibility": "aimachingmail项目完全兼容",
-        },
-    }
-
-
-# SMTP密码解密快速访问端点
-@app.get("/smtp-info", tags=["系统"], summary="SMTP解密接入信息")
-async def smtp_decryption_info():
-    """SMTP密码解密接入信息"""
-    return {
-        "title": "SMTP密码解密接入",
-        "description": "为外部系统提供SMTP配置和密码解密服务",
-        "compatibility": {
-            "projects": ["aimachingmail"],
-            "encryption": "Fernet with SHA256 key derivation",
-            "formats": ["hex", "base64", "bytes"],
-        },
-        "api_base": f"{settings.API_V1_STR}/smtp",
-        "key_endpoints": {
-            "get_default_config": f"{settings.API_V1_STR}/smtp/config/{{tenant_id}}/default",
-            "get_config_by_id": f"{settings.API_V1_STR}/smtp/config/{{tenant_id}}/{{setting_id}}",
-            "test_connection": f"{settings.API_V1_STR}/smtp/test",
-            "test_encryption": f"{settings.API_V1_STR}/smtp/password/test",
-            "health_check": f"{settings.API_V1_STR}/smtp/health",
-            "usage_guide": f"{settings.API_V1_STR}/smtp/usage/guide",
-        },
-        "security": {
-            "encryption": "Fernet对称加密",
-            "key_derivation": "SHA256哈希（与aimachingmail一致）",
-            "key_required": "ENCRYPTION_KEY环境变量",
-            "password_format": "支持多种格式（hex/base64/bytes）",
-        },
-        "integration_steps": [
-            "1. 确保与aimachingmail使用相同的ENCRYPTION_KEY",
-            "2. 调用配置API获取SMTP设置",
-            "3. 使用返回的明文密码进行SMTP连接",
-            "4. 可选：调用测试接口验证连接",
-            "5. 使用健康检查接口监控状态",
-        ],
-        "troubleshooting": [
-            "检查ENCRYPTION_KEY是否与aimachingmail项目一致",
-            "使用/smtp/password/test验证加密解密功能",
-            "查看应用日志获取详细错误信息",
-            "确认数据库中的密码格式",
-        ],
-        "documentation": "/docs#/SMTP配置与解密",
-    }
-
-
-# 快速测试端点
 @app.get("/quick-test", tags=["系统"], summary="快速功能测试")
 async def quick_test():
     """快速测试系统核心功能"""
     results = {}
 
     try:
-        # 测试数据库连接
-        from .database import SessionLocal
+        # 测试数据库连接池
+        from .database import check_database_connection
 
-        db = SessionLocal()
-        db.execute("SELECT 1")
-        db.close()
-        results["database"] = "✅ 连接正常"
+        db_connected = await check_database_connection()
+        results["database"] = "✅ 连接池正常" if db_connected else "❌ 连接池失败"
     except Exception as e:
-        results["database"] = f"❌ 连接失败: {str(e)}"
+        results["database"] = f"❌ 连接池测试失败: {str(e)}"
 
     try:
         # 测试加密解密
@@ -450,6 +352,7 @@ async def quick_test():
     return {
         "status": "success",
         "message": "快速测试完成",
+        "database_type": "asyncpg连接池",
         "results": results,
         "timestamp": time.time(),
         "recommendations": [
@@ -457,15 +360,17 @@ async def quick_test():
             "确保ENCRYPTION_KEY与aimachingmail项目一致",
             "查看完整健康检查：/health",
             "查看SMTP专门测试：/api/v1/smtp/health",
+            "数据库连接池状态：/health",
         ],
     }
 
 
-# 启动事件
+# 启动和关闭事件
 @app.on_event("startup")
 async def startup_event():
     """应用启动时执行"""
     logger.info("邮件API服务启动...")
+    logger.info("数据库类型: asyncpg连接池")
     logger.info(f"上传目录: {ATTACHMENT_DIR}")
     logger.info(f"API文档: http://localhost:8000/docs")
     logger.info(f"SMTP解密API: http://localhost:8000{settings.API_V1_STR}/smtp")
@@ -475,6 +380,14 @@ async def startup_event():
     for directory in [ATTACHMENT_DIR, TEMP_DIR]:
         directory.mkdir(parents=True, exist_ok=True)
         logger.info(f"确保目录存在: {directory}")
+
+    # 初始化数据库连接池
+    try:
+        await db_manager.initialize()
+        logger.info("✅ 数据库连接池初始化成功")
+    except Exception as e:
+        logger.error(f"❌ 数据库连接池初始化失败: {str(e)}")
+        raise
 
     # 测试SMTP密码加密功能
     try:
@@ -495,6 +408,7 @@ async def startup_event():
     # 输出重要信息
     logger.info("=" * 60)
     logger.info("🚀 邮件API服务启动完成")
+    logger.info("🗄️  数据库: asyncpg连接池（高性能异步访问）")
     logger.info(f"📖 API文档: http://localhost:8000/docs")
     logger.info(f"🔐 SMTP解密: http://localhost:8000{settings.API_V1_STR}/smtp")
     logger.info(f"🩺 健康检查: http://localhost:8000/health")
@@ -508,8 +422,14 @@ async def shutdown_event():
     """应用关闭时执行"""
     logger.info("邮件API服务正在关闭...")
 
-    # 这里可以添加清理逻辑
-    # 例如：清理临时文件、关闭数据库连接等
+    # 关闭数据库连接池
+    try:
+        await db_manager.close()
+        logger.info("✅ 数据库连接池已关闭")
+    except Exception as e:
+        logger.error(f"❌ 关闭数据库连接池失败: {str(e)}")
+
+    logger.info("邮件API服务已关闭")
 
 
 # 开发环境热重载支持
@@ -526,6 +446,3 @@ if __name__ == "__main__":
         log_level="info",
         access_log=True,
     )
-
-# 生产环境部署示例：
-# uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4

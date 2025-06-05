@@ -429,93 +429,6 @@ class FileValidator:
 
         return result
 
-    def validate_mime_type(self, filename: str, content_type: str) -> Dict[str, Any]:
-        """验证MIME类型"""
-        result = {"valid": True, "errors": []}
-
-        file_ext = Path(filename).suffix.lower()
-        expected_mime = MIME_TYPE_MAPPING.get(file_ext)
-
-        if expected_mime and content_type:
-            # 允许一些常见的变体
-            mime_variants = {
-                "application/pdf": ["application/pdf"],
-                "image/jpeg": ["image/jpeg", "image/jpg"],
-                "image/png": ["image/png"],
-                "text/plain": ["text/plain", "text/csv"],
-                "application/zip": ["application/zip", "application/x-zip-compressed"],
-            }
-
-            allowed_types = mime_variants.get(expected_mime, [expected_mime])
-
-            if content_type not in allowed_types:
-                result["valid"] = False
-                result["errors"].append(
-                    f"MIME类型不匹配（期望: {expected_mime}，实际: {content_type}）"
-                )
-
-        return result
-
-    def scan_file_content(self, file_content: bytes, filename: str) -> Dict[str, Any]:
-        """扫描文件内容（基本恶意内容检测）"""
-        result = {"valid": True, "errors": [], "warnings": []}
-
-        # 检查文件头（魔数）
-        file_ext = Path(filename).suffix.lower()
-
-        # 常见文件格式的魔数
-        magic_numbers = {
-            ".pdf": [b"%PDF"],
-            ".zip": [b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08"],
-            ".jpg": [b"\xff\xd8\xff"],
-            ".jpeg": [b"\xff\xd8\xff"],
-            ".png": [b"\x89PNG\r\n\x1a\n"],
-            ".gif": [b"GIF87a", b"GIF89a"],
-            ".doc": [b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"],
-            ".docx": [b"PK\x03\x04"],
-        }
-
-        if file_ext in magic_numbers:
-            expected_headers = magic_numbers[file_ext]
-            header_found = any(
-                file_content.startswith(header) for header in expected_headers
-            )
-
-            if not header_found:
-                result["warnings"].append(f"文件头不匹配预期格式 {file_ext}")
-
-        # 检查可疑内容（简单实现）
-        suspicious_patterns = [
-            b"<script",
-            b"javascript:",
-            b"vbscript:",
-            b"onload=",
-            b"onerror=",
-            b"eval(",
-            b"base64,",
-        ]
-
-        for pattern in suspicious_patterns:
-            if pattern in file_content.lower():
-                result["warnings"].append(
-                    f"发现可疑内容模式: {pattern.decode('utf-8', errors='ignore')}"
-                )
-
-        # 检查嵌入的可执行文件
-        executable_signatures = [
-            b"MZ",  # PE executable
-            b"\x7fELF",  # ELF executable
-            b"\xca\xfe\xba\xbe",  # Mach-O binary
-        ]
-
-        for sig in executable_signatures:
-            if sig in file_content:
-                result["valid"] = False
-                result["errors"].append("文件包含可执行代码")
-                break
-
-        return result
-
     def validate_file(
         self, file_content: bytes, filename: str, content_type: str = None
     ) -> Dict[str, Any]:
@@ -544,21 +457,6 @@ class FileValidator:
             result["valid"] = False
             result["errors"].extend(size_result["errors"])
 
-        # 验证MIME类型
-        if content_type:
-            mime_result = self.validate_mime_type(filename, content_type)
-            if not mime_result["valid"]:
-                result["warnings"].extend(
-                    mime_result["errors"]
-                )  # MIME类型不匹配作为警告
-
-        # 扫描文件内容
-        content_result = self.scan_file_content(file_content, filename)
-        if not content_result["valid"]:
-            result["valid"] = False
-            result["errors"].extend(content_result["errors"])
-        result["warnings"].extend(content_result["warnings"])
-
         return result
 
 
@@ -575,36 +473,6 @@ def sanitize_filename(filename: str) -> str:
         name, ext = os.path.splitext(filename)
         max_name_length = 255 - len(ext)
         filename = name[:max_name_length] + ext
-
-    # 确保不是保留名称（Windows）
-    reserved_names = [
-        "CON",
-        "PRN",
-        "AUX",
-        "NUL",
-        "COM1",
-        "COM2",
-        "COM3",
-        "COM4",
-        "COM5",
-        "COM6",
-        "COM7",
-        "COM8",
-        "COM9",
-        "LPT1",
-        "LPT2",
-        "LPT3",
-        "LPT4",
-        "LPT5",
-        "LPT6",
-        "LPT7",
-        "LPT8",
-        "LPT9",
-    ]
-
-    name_without_ext = Path(filename).stem.upper()
-    if name_without_ext in reserved_names:
-        filename = f"file_{filename}"
 
     return filename
 

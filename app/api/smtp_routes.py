@@ -1,18 +1,16 @@
-# app/api/smtp_routes.py
+# app/api/smtp_routes.py - asyncpg版本
 """
 SMTP密码解密接入API路由 - 修复版
 为外部系统提供SMTP配置和密码解密接口，与aimachingmail项目完全兼容
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query, Body
+from fastapi import APIRouter, HTTPException, status, Query, Body
 from fastapi.responses import JSONResponse
-from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 from uuid import UUID
 import logging
 from datetime import datetime
 
-from ..database import get_db
 from ..services.email_service import EmailService
 from ..utils.security import smtp_password_manager, test_smtp_password_encryption
 from ..schemas.email_schemas import SMTPSettingsCreate, SMTPSettingsResponse
@@ -78,15 +76,15 @@ class SMTPListResponse(BaseModel):
 
 
 @router.get("/config/{tenant_id}/default", response_model=SMTPConfigResponse)
-def get_default_smtp_config(tenant_id: UUID, db: Session = Depends(get_db)):
+async def get_default_smtp_config(tenant_id: UUID):
     """
     获取租户的默认SMTP配置（包含解密密码）
 
     此接口提供给其他系统使用，返回可直接用于SMTP连接的配置信息
     """
     try:
-        email_service = EmailService(db)
-        config_info = email_service.get_smtp_config_info(tenant_id, None)
+        email_service = EmailService()
+        config_info = await email_service.get_smtp_config_info(tenant_id, None)
 
         if not config_info:
             raise HTTPException(
@@ -111,17 +109,15 @@ def get_default_smtp_config(tenant_id: UUID, db: Session = Depends(get_db)):
 
 
 @router.get("/config/{tenant_id}/{setting_id}", response_model=SMTPConfigResponse)
-def get_smtp_config_by_id(
-    tenant_id: UUID, setting_id: UUID, db: Session = Depends(get_db)
-):
+async def get_smtp_config_by_id(tenant_id: UUID, setting_id: UUID):
     """
     根据ID获取特定的SMTP配置（包含解密密码）
 
     此接口提供给其他系统使用，返回可直接用于SMTP连接的配置信息
     """
     try:
-        email_service = EmailService(db)
-        config_info = email_service.get_smtp_config_info(tenant_id, setting_id)
+        email_service = EmailService()
+        config_info = await email_service.get_smtp_config_info(tenant_id, setting_id)
 
         if not config_info:
             raise HTTPException(
@@ -146,10 +142,9 @@ def get_smtp_config_by_id(
 
 
 @router.get("/configs/{tenant_id}", response_model=SMTPListResponse)
-def get_smtp_configs_list(
+async def get_smtp_configs_list(
     tenant_id: UUID,
     include_password: bool = Query(False, description="是否包含解密后的密码"),
-    db: Session = Depends(get_db),
 ):
     """
     获取租户的所有SMTP配置列表
@@ -159,42 +154,46 @@ def get_smtp_configs_list(
         include_password: 是否包含解密后的密码（默认不包含，出于安全考虑）
     """
     try:
-        email_service = EmailService(db)
-        smtp_settings_list = email_service.get_smtp_settings_list(tenant_id)
+        email_service = EmailService()
+        smtp_settings_list = await email_service.get_smtp_settings_list(tenant_id)
 
         configs = []
         for settings in smtp_settings_list:
             if include_password:
                 # 包含解密密码
-                config_info = email_service.get_smtp_config_info(tenant_id, settings.id)
+                config_info = await email_service.get_smtp_config_info(
+                    tenant_id, settings["id"]
+                )
                 if config_info:
                     configs.append(SMTPConfigResponse(**config_info))
             else:
                 # 不包含密码
                 config_data = {
-                    "id": str(settings.id),
-                    "tenant_id": str(settings.tenant_id),
-                    "setting_name": settings.setting_name,
-                    "smtp_host": settings.smtp_host,
-                    "smtp_port": settings.smtp_port,
-                    "smtp_username": settings.smtp_username,
+                    "id": str(settings["id"]),
+                    "tenant_id": str(settings["tenant_id"]),
+                    "setting_name": settings["setting_name"],
+                    "smtp_host": settings["smtp_host"],
+                    "smtp_port": settings["smtp_port"],
+                    "smtp_username": settings["smtp_username"],
                     "smtp_password": "***",  # 隐藏密码
-                    "security_protocol": settings.security_protocol,
-                    "from_email": settings.from_email,
-                    "from_name": settings.from_name,
-                    "reply_to_email": settings.reply_to_email,
-                    "daily_send_limit": settings.daily_send_limit,
-                    "hourly_send_limit": settings.hourly_send_limit,
-                    "is_default": settings.is_default,
-                    "is_active": settings.is_active,
-                    "connection_status": settings.connection_status,
+                    "security_protocol": settings["security_protocol"],
+                    "from_email": settings["from_email"],
+                    "from_name": settings["from_name"],
+                    "reply_to_email": settings["reply_to_email"],
+                    "daily_send_limit": settings["daily_send_limit"],
+                    "hourly_send_limit": settings["hourly_send_limit"],
+                    "is_default": settings["is_default"],
+                    "is_active": settings["is_active"],
+                    "connection_status": settings["connection_status"],
                     "last_test_at": (
-                        settings.last_test_at.isoformat()
-                        if settings.last_test_at
+                        settings["last_test_at"].isoformat()
+                        if settings["last_test_at"]
                         else None
                     ),
                     "created_at": (
-                        settings.created_at.isoformat() if settings.created_at else None
+                        settings["created_at"].isoformat()
+                        if settings["created_at"]
+                        else None
                     ),
                 }
                 configs.append(SMTPConfigResponse(**config_data))
@@ -210,19 +209,19 @@ def get_smtp_configs_list(
 
 
 @router.post("/config", response_model=SMTPConfigResponse)
-def create_smtp_config(config_data: SMTPSettingsCreate, db: Session = Depends(get_db)):
+async def create_smtp_config(config_data: SMTPSettingsCreate):
     """
     创建新的SMTP配置
 
     此接口会自动加密密码并存储，返回包含解密密码的配置信息
     """
     try:
-        email_service = EmailService(db)
-        smtp_settings = email_service.create_smtp_settings(config_data)
+        email_service = EmailService()
+        smtp_settings = await email_service.create_smtp_settings(config_data)
 
         # 返回包含解密密码的配置信息
-        config_info = email_service.get_smtp_config_info(
-            config_data.tenant_id, smtp_settings.id
+        config_info = await email_service.get_smtp_config_info(
+            config_data.tenant_id, smtp_settings["id"]
         )
 
         if not config_info:
@@ -244,9 +243,7 @@ def create_smtp_config(config_data: SMTPSettingsCreate, db: Session = Depends(ge
 
 
 @router.post("/test")
-async def test_smtp_connection(
-    test_request: SMTPTestRequest, db: Session = Depends(get_db)
-):
+async def test_smtp_connection(test_request: SMTPTestRequest):
     """
     测试SMTP连接
 
@@ -257,7 +254,7 @@ async def test_smtp_connection(
             f"开始测试SMTP连接: tenant_id={test_request.tenant_id}, setting_id={test_request.setting_id}"
         )
 
-        email_service = EmailService(db)
+        email_service = EmailService()
         result = await email_service.test_smtp_connection(
             test_request.tenant_id, test_request.setting_id
         )
@@ -353,6 +350,7 @@ def get_system_info():
         key_info = smtp_password_manager.get_key_info()
         return {
             "status": "active",
+            "database": "asyncpg连接池",
             "encryption_info": key_info,
             "supported_protocols": ["TLS", "SSL", "None"],
             "api_version": "v1",
@@ -370,7 +368,7 @@ def get_system_info():
 
 
 @router.get("/health")
-def health_check():
+async def health_check():
     """
     健康检查接口
 
@@ -380,8 +378,15 @@ def health_check():
         # 测试加密解密功能
         test_result = smtp_password_manager.test_encryption()
 
+        # 测试数据库连接
+        from ..database import check_database_connection
+
+        db_connected = await check_database_connection()
+
         return {
-            "status": "healthy" if test_result else "unhealthy",
+            "status": "healthy" if test_result and db_connected else "unhealthy",
+            "database": "connected" if db_connected else "error",
+            "database_type": "asyncpg连接池",
             "encryption_test": test_result,
             "compatible_with": "aimachingmail",
             "encryption_method": "Fernet with SHA256 key derivation",
@@ -412,6 +417,7 @@ def get_usage_guide():
     return {
         "title": "SMTP密码解密接入API使用指南",
         "version": "v1.0",
+        "database": "asyncpg连接池（高性能异步访问）",
         "compatibility": "与aimachingmail项目完全兼容",
         "base_url": "/api/v1/smtp",
         "encryption_info": {
@@ -455,6 +461,7 @@ def get_usage_guide():
         },
         "important_notes": [
             "与aimachingmail项目使用相同的加密算法（SHA256派生密钥）",
+            "使用asyncpg连接池提供高性能异步数据库访问",
             "所有密码都使用Fernet加密算法加密存储",
             "返回的明文密码仅用于SMTP连接，请妥善保护",
             "建议在网络层面限制API访问权限",
@@ -466,6 +473,7 @@ def get_usage_guide():
             "使用/smtp/password/test接口验证加密解密功能",
             "使用/smtp/health接口检查系统状态",
             "查看应用日志获取详细错误信息",
+            "检查数据库连接池状态",
         ],
     }
 
@@ -489,7 +497,7 @@ def get_error_codes():
             "encryption_key_missing": "ENCRYPTION_KEY环境变量未设置",
             "encryption_key_invalid": "加密密钥格式错误或损坏",
             "key_derivation_mismatch": "密钥派生算法与aimachingmail不一致",
-            "database_connection_failed": "数据库连接失败",
+            "database_connection_failed": "数据库连接池连接失败",
             "smtp_config_not_found": "SMTP配置不存在或已删除",
             "password_format_error": "数据库中的密码格式不被识别",
         },
@@ -499,5 +507,6 @@ def get_error_codes():
             "health_check": "使用 /smtp/health 检查系统状态",
             "compare_keys": "确保与aimachingmail使用相同的ENCRYPTION_KEY",
             "test_encryption": "使用加密/解密工具接口测试密码处理",
+            "database_pool": "检查asyncpg连接池状态",
         },
     }

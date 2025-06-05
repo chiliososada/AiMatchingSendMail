@@ -1,4 +1,4 @@
-# app/config.py
+# app/config.py - asyncpg版本
 from pydantic_settings import BaseSettings
 from pydantic import field_validator
 from typing import List, Optional, Any, Dict, Union
@@ -19,11 +19,26 @@ class Settings(BaseSettings):
     PORT: int = 8000
     WORKERS: int = 1
 
-    # 数据库配置
-    DATABASE_URL: str = "sqlite:///./email_api.db"
+    # 数据库配置 - asyncpg相关
+    DATABASE_URL: str = "postgresql://emailapi:emailapi123@localhost:5432/email_api_db"
     DATABASE_ECHO: bool = False
-    DATABASE_POOL_SIZE: int = 5
-    DATABASE_MAX_OVERFLOW: int = 10
+    DATABASE_POOL_SIZE: int = 10  # asyncpg连接池最小连接数
+    DATABASE_MAX_OVERFLOW: int = 20  # asyncpg连接池最大连接数
+    DATABASE_POOL_MAX_SIZE: int = 30  # asyncpg连接池总连接数上限
+    DATABASE_COMMAND_TIMEOUT: int = 60  # asyncpg命令超时时间（秒）
+    DATABASE_CONNECTION_TIMEOUT: int = 30  # asyncpg连接超时时间（秒）
+    DATABASE_SERVER_SETTINGS: Dict[str, str] = {
+        "application_name": "EmailAPI",
+        "timezone": "Asia/Tokyo",
+        "statement_timeout": "300s",
+        "search_path": "public",
+    }
+
+    # asyncpg特定配置
+    ASYNCPG_MIN_SIZE: int = 5  # 连接池最小连接数
+    ASYNCPG_MAX_SIZE: int = 25  # 连接池最大连接数
+    ASYNCPG_MAX_QUERIES: int = 50000  # 单个连接最大查询数
+    ASYNCPG_MAX_INACTIVE_CONNECTION_LIFETIME: float = 300.0  # 非活跃连接生存时间
 
     # 安全配置
     SECRET_KEY: str = "your-secret-key-change-in-production"
@@ -196,6 +211,32 @@ class Settings(BaseSettings):
         "Referrer-Policy": "strict-origin-when-cross-origin",
     }
 
+    # asyncpg连接池配置
+    ASYNCPG_POOL_CONFIG: Dict[str, Any] = {
+        "min_size": 5,
+        "max_size": 25,
+        "max_queries": 50000,
+        "max_inactive_connection_lifetime": 300.0,
+        "command_timeout": 60,
+        "server_settings": {
+            "application_name": "EmailAPI",
+            "timezone": "Asia/Tokyo",
+        },
+    }
+
+    # 数据库连接重试配置
+    DB_RETRY_ATTEMPTS: int = 3
+    DB_RETRY_DELAY: float = 1.0
+    DB_RETRY_BACKOFF: float = 2.0
+
+    # 连接池监控配置
+    POOL_MONITORING_ENABLED: bool = True
+    POOL_STATS_INTERVAL: int = 60  # 秒
+
+    # 查询性能监控
+    SLOW_QUERY_THRESHOLD: float = 1.0  # 秒
+    QUERY_LOGGING_ENABLED: bool = True
+
     # 字段验证器 - 清理带注释的数值
     @field_validator(
         "MAX_FILE_SIZE", "MAX_TOTAL_REQUEST_SIZE", "LOG_MAX_SIZE", mode="before"
@@ -220,6 +261,24 @@ class Settings(BaseSettings):
                     return 104857600
                 elif "LOG_MAX_SIZE" in str(v):
                     return 10485760
+        return v
+
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def validate_database_url(cls, v):
+        """验证数据库URL格式"""
+        if isinstance(v, str):
+            if not v.startswith(("postgresql://", "postgres://")):
+                # 如果是SQLite URL，转换为PostgreSQL提示
+                if v.startswith("sqlite:"):
+                    raise ValueError(
+                        "asyncpg不支持SQLite，请使用PostgreSQL数据库URL，"
+                        "格式: postgresql://user:password@host:port/database"
+                    )
+                # 如果没有协议前缀，添加postgresql://
+                if "://" not in v:
+                    v = f"postgresql://{v}"
+            return v
         return v
 
     @property
@@ -253,6 +312,25 @@ class Settings(BaseSettings):
         """将字节转换为MB"""
         return size_bytes / (1024 * 1024)
 
+    def get_database_url_for_asyncpg(self) -> str:
+        """获取适用于asyncpg的数据库URL"""
+        url = self.DATABASE_URL
+        # 确保使用postgres://而不是postgresql://（asyncpg兼容性）
+        if url.startswith("postgresql://"):
+            url = url.replace("postgresql://", "postgres://", 1)
+        return url
+
+    def get_asyncpg_pool_config(self) -> Dict[str, Any]:
+        """获取asyncpg连接池配置"""
+        return {
+            "min_size": self.ASYNCPG_MIN_SIZE,
+            "max_size": self.ASYNCPG_MAX_SIZE,
+            "max_queries": self.ASYNCPG_MAX_QUERIES,
+            "max_inactive_connection_lifetime": self.ASYNCPG_MAX_INACTIVE_CONNECTION_LIFETIME,
+            "command_timeout": self.DATABASE_COMMAND_TIMEOUT,
+            "server_settings": self.DATABASE_SERVER_SETTINGS,
+        }
+
     def get_log_config(self) -> Dict[str, Any]:
         """获取日志配置"""
         return {
@@ -264,6 +342,9 @@ class Settings(BaseSettings):
                 },
                 "detailed": {
                     "format": "%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(funcName)s - %(message)s",
+                },
+                "database": {
+                    "format": "%(asctime)s - DB - %(levelname)s - %(message)s",
                 },
             },
             "handlers": {
@@ -282,6 +363,15 @@ class Settings(BaseSettings):
                     "backupCount": self.LOG_BACKUP_COUNT,
                     "encoding": "utf-8",
                 },
+                "database": {
+                    "class": "logging.handlers.RotatingFileHandler",
+                    "level": "INFO",
+                    "formatter": "database",
+                    "filename": "database.log",
+                    "maxBytes": self.LOG_MAX_SIZE,
+                    "backupCount": 3,
+                    "encoding": "utf-8",
+                },
             },
             "loggers": {
                 "": {
@@ -293,9 +383,14 @@ class Settings(BaseSettings):
                     "handlers": ["console"],
                     "propagate": False,
                 },
-                "sqlalchemy.engine": {
+                "asyncpg": {
                     "level": "INFO" if self.DATABASE_ECHO else "WARNING",
-                    "handlers": ["file"],
+                    "handlers": ["database"],
+                    "propagate": False,
+                },
+                "app.database": {
+                    "level": "INFO",
+                    "handlers": ["database"],
                     "propagate": False,
                 },
             },
@@ -323,6 +418,17 @@ class Settings(BaseSettings):
             if not getattr(self, setting):
                 errors.append(f"缺少必需的配置: {setting}")
 
+        # 验证数据库URL
+        if not self.DATABASE_URL.startswith(("postgresql://", "postgres://")):
+            errors.append("asyncpg需要PostgreSQL数据库URL")
+
+        # 验证连接池配置
+        if self.ASYNCPG_MIN_SIZE > self.ASYNCPG_MAX_SIZE:
+            errors.append("ASYNCPG_MIN_SIZE不能大于ASYNCPG_MAX_SIZE")
+
+        if self.DATABASE_POOL_SIZE < 1:
+            errors.append("DATABASE_POOL_SIZE必须大于0")
+
         # 验证文件大小限制
         if self.MAX_FILE_SIZE > 100 * 1024 * 1024:
             errors.append("MAX_FILE_SIZE 不能超过100MB")
@@ -338,12 +444,9 @@ class Settings(BaseSettings):
         if self.WORKERS < 1:
             errors.append("WORKERS 必须大于0")
 
-        # 验证数据库连接池设置
-        if self.DATABASE_POOL_SIZE < 1:
-            errors.append("DATABASE_POOL_SIZE 必须大于0")
-
-        if self.DATABASE_MAX_OVERFLOW < 0:
-            errors.append("DATABASE_MAX_OVERFLOW 不能为负数")
+        # 验证超时配置
+        if self.DATABASE_COMMAND_TIMEOUT < 1:
+            errors.append("DATABASE_COMMAND_TIMEOUT 必须大于0")
 
         return errors
 
@@ -370,6 +473,23 @@ class Settings(BaseSettings):
             "log_max_size": f"{self.get_file_size_mb(self.LOG_MAX_SIZE):.1f}MB",
         }
 
+    def get_database_info(self) -> Dict[str, Any]:
+        """获取数据库配置信息"""
+        return {
+            "type": "PostgreSQL with asyncpg",
+            "url": self.get_database_url(hide_password=True),
+            "pool_config": {
+                "min_size": self.ASYNCPG_MIN_SIZE,
+                "max_size": self.ASYNCPG_MAX_SIZE,
+                "command_timeout": self.DATABASE_COMMAND_TIMEOUT,
+            },
+            "monitoring": {
+                "slow_query_threshold": self.SLOW_QUERY_THRESHOLD,
+                "query_logging": self.QUERY_LOGGING_ENABLED,
+                "pool_monitoring": self.POOL_MONITORING_ENABLED,
+            },
+        }
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
@@ -382,11 +502,14 @@ class Settings(BaseSettings):
 try:
     settings = Settings()
     print("✅ 配置加载成功")
+    print(f"🗄️  数据库类型: asyncpg连接池")
+    print(f"🔗 数据库URL: {settings.get_database_url(hide_password=True)}")
+    print(f"🏊 连接池配置: {settings.ASYNCPG_MIN_SIZE}-{settings.ASYNCPG_MAX_SIZE}")
 except Exception as e:
     print(f"❌ 配置加载失败: {str(e)}")
     print("使用默认配置启动...")
     settings = Settings(
-        DATABASE_URL="sqlite:///./email_api.db",
+        DATABASE_URL="postgresql://emailapi:emailapi123@localhost:5432/email_api_db",
         SECRET_KEY="development-secret-key",
         ENCRYPTION_KEY=None,
     )
@@ -415,12 +538,22 @@ except Exception as e:
 if settings.is_development():
     settings.DATABASE_ECHO = True
     settings.DEBUG = True
-    print("🔧 开发环境配置已应用")
+    settings.QUERY_LOGGING_ENABLED = True
+    print("🔧 开发环境配置已应用（包含查询日志）")
 
 if settings.is_production():
     settings.DATABASE_ECHO = False
     settings.DEBUG = False
+    settings.QUERY_LOGGING_ENABLED = False
     print("🔒 生产环境配置已应用")
+
+# asyncpg特定检查
+try:
+    import asyncpg
+
+    print("✅ asyncpg已安装")
+except ImportError:
+    print("❌ 需要安装asyncpg: pip install asyncpg")
 
 # 导出
 __all__ = ["settings", "Settings"]
