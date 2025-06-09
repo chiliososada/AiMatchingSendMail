@@ -1106,7 +1106,7 @@ class EmailService:
                 raise ValueError("未找到可用的SMTP设置")
 
             # 为整个批次创建一个主队列ID用于跟踪
-            batch_queue_id = uuid.uuid4()
+            batch_queue_id = uuid4()
 
             # 存储所有单独发送的结果
             individual_results = []
