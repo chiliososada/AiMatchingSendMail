@@ -674,3 +674,80 @@ async def health_check():
                 "timestamp": datetime.utcnow().isoformat(),
             },
         )
+
+
+# 在 app/api/email_routes.py 中添加的新路由
+
+
+@router.post("/send-individual", response_model=EmailSendResponse)
+async def send_email_individual(
+    email_request: EmailSendRequest,
+    background_tasks: BackgroundTasks,
+):
+    """
+    单独发送邮件（每个收件人收到独立的邮件）
+
+    与 /send 接口的区别：
+    - /send: 一封邮件发给多个收件人（收件人能看到彼此）
+    - /send-individual: 循环发送单独邮件（收件人看不到其他人）
+
+    请求格式与 /send 完全相同，但行为不同
+    """
+    try:
+        logger.info(f"开始单独发送邮件给 {len(email_request.to_emails)} 个收件人")
+
+        email_service = EmailService()
+        result = await email_service.send_email_individual(email_request)
+
+        return EmailSendResponse(
+            queue_id=result["queue_id"],
+            status=result["status"],
+            message=result["message"],
+            to_emails=result["to_emails"],
+            scheduled_at=result.get("scheduled_at"),
+            attachments_count=result.get("attachment_count", 0),
+        )
+
+    except Exception as e:
+        logger.error(f"单独发送邮件失败: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"单独发送邮件失败: {str(e)}",
+        )
+
+
+@router.post("/send-individual-with-attachments", response_model=EmailSendResponse)
+async def send_email_individual_with_attachments(
+    email_request: EmailWithAttachmentsRequest,
+    background_tasks: BackgroundTasks,
+):
+    """
+    单独发送带附件的邮件（每个收件人收到独立的邮件）
+
+    与 /send-with-attachments 接口的区别：
+    - /send-with-attachments: 一封邮件发给多个收件人（收件人能看到彼此）
+    - /send-individual-with-attachments: 循环发送单独邮件（收件人看不到其他人）
+    """
+    try:
+        logger.info(f"开始单独发送带附件邮件给 {len(email_request.to_emails)} 个收件人")
+
+        email_service = EmailService()
+        result = await email_service.send_email_individual_with_attachments(
+            email_request
+        )
+
+        return EmailSendResponse(
+            queue_id=result["queue_id"],
+            status=result["status"],
+            message=result["message"],
+            to_emails=result["to_emails"],
+            scheduled_at=result.get("scheduled_at"),
+            attachments_count=result.get("attachment_count", 0),
+        )
+
+    except Exception as e:
+        logger.error(f"单独发送带附件邮件失败: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"单独发送邮件失败: {str(e)}",
+        )

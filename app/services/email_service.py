@@ -1,5 +1,5 @@
 # app/services/email_service.py - asyncpg版本
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any, Tuple, Union
 from uuid import UUID, uuid4
 from datetime import datetime, timedelta
 import os
@@ -8,6 +8,7 @@ from pathlib import Path
 import mimetypes
 import logging
 import json
+from uuid import UUID, uuid4
 
 from ..database import (
     get_db_connection,
@@ -896,3 +897,505 @@ class EmailService:
 
             logger.error(f"详细错误信息: {traceback.format_exc()}")
             return None
+
+        # 在 app/services/email_service.py 的 EmailService 类中添加的新方法
+
+    async def send_email_individual(
+        self,
+        email_request: EmailSendRequest,
+        created_by: Optional[UUID] = None,
+        delay_between_sends: float = 0.5,
+    ) -> dict:
+        """
+        单独发送邮件（每个收件人收到独立的邮件）
+
+        Args:
+            email_request: 邮件发送请求
+            created_by: 创建者ID
+            delay_between_sends: 发送间隔（秒）
+
+        Returns:
+            Dict: 发送结果汇总
+        """
+        try:
+            to_emails = email_request.to_emails
+            total_recipients = len(to_emails)
+
+            logger.info(f"开始单独发送邮件给 {total_recipients} 个收件人")
+
+            # 获取SMTP设置
+            smtp_settings = await self.get_smtp_settings(
+                email_request.tenant_id, email_request.smtp_setting_id
+            )
+            if not smtp_settings:
+                raise ValueError("未找到可用的SMTP设置")
+
+            # 为整个批次创建一个主队列ID用于跟踪
+            batch_queue_id = uuid.uuid4()
+
+            # 存储所有单独发送的结果
+            individual_results = []
+            successful_sends = []
+            failed_sends = []
+
+            # 创建SMTP服务实例
+            class SMTPSettingsObj:
+                def __init__(self, data):
+                    for key, value in data.items():
+                        setattr(self, key, value)
+
+            smtp_settings_obj = SMTPSettingsObj(smtp_settings)
+            smtp_service = SMTPService(smtp_settings_obj)
+
+            # 循环单独发送每封邮件
+            for index, recipient_email in enumerate(to_emails):
+                try:
+                    logger.info(
+                        f"发送第 {index + 1}/{total_recipients} 封邮件到: {recipient_email}"
+                    )
+
+                    # 创建单独的队列记录
+                    queue_item = await self._create_individual_queue_item(
+                        email_request,
+                        recipient_email,
+                        batch_queue_id,
+                        created_by,
+                        index + 1,
+                    )
+
+                    # 发送单独邮件
+                    result = await smtp_service.send_email(
+                        to_emails=[recipient_email],  # 只发给一个收件人
+                        subject=email_request.subject,
+                        body_text=email_request.body_text,
+                        body_html=email_request.body_html,
+                        attachments=None,  # 基础版本不包含附件
+                        attachment_paths=None,
+                    )
+
+                    # 更新队列状态
+                    await self._update_individual_queue_status(
+                        queue_item["id"], result, email_request.tenant_id
+                    )
+
+                    individual_results.append(
+                        {
+                            "recipient": recipient_email,
+                            "queue_id": queue_item["id"],
+                            "status": result["status"],
+                            "message": result.get("message", ""),
+                            "index": index + 1,
+                        }
+                    )
+
+                    if result["status"] == "success":
+                        successful_sends.append(recipient_email)
+                        logger.info(
+                            f"✅ 第 {index + 1} 封邮件发送成功: {recipient_email}"
+                        )
+                    else:
+                        failed_sends.append(
+                            {
+                                "email": recipient_email,
+                                "error": result.get("error", "Unknown error"),
+                            }
+                        )
+                        logger.error(
+                            f"❌ 第 {index + 1} 封邮件发送失败: {recipient_email} - {result.get('error', '')}"
+                        )
+
+                    # 发送间隔
+                    if index < total_recipients - 1:
+                        await asyncio.sleep(delay_between_sends)
+
+                except Exception as e:
+                    logger.error(f"发送给 {recipient_email} 的邮件异常: {str(e)}")
+                    failed_sends.append({"email": recipient_email, "error": str(e)})
+                    individual_results.append(
+                        {
+                            "recipient": recipient_email,
+                            "queue_id": None,
+                            "status": "error",
+                            "message": str(e),
+                            "index": index + 1,
+                        }
+                    )
+
+            # 创建批次汇总记录
+            await self._create_batch_summary_record(
+                batch_queue_id, email_request, individual_results, created_by
+            )
+
+            # 生成汇总结果
+            success_count = len(successful_sends)
+            failed_count = len(failed_sends)
+            success_rate = (
+                (success_count / total_recipients * 100) if total_recipients > 0 else 0
+            )
+
+            overall_status = (
+                "success"
+                if failed_count == 0
+                else "partial" if success_count > 0 else "failed"
+            )
+
+            return {
+                "queue_id": batch_queue_id,
+                "status": overall_status,
+                "message": f"单独发送完成: {success_count} 成功, {failed_count} 失败",
+                "to_emails": to_emails,
+                "scheduled_at": email_request.scheduled_at,
+                "attachment_count": 0,
+                "individual_results": individual_results,
+                "summary": {
+                    "total_recipients": total_recipients,
+                    "successful_sends": success_count,
+                    "failed_sends": failed_count,
+                    "success_rate": round(success_rate, 2),
+                    "successful_emails": successful_sends,
+                    "failed_emails": failed_sends,
+                },
+            }
+
+        except Exception as e:
+            logger.error(f"单独发送邮件失败: {str(e)}")
+            raise Exception(f"单独发送邮件失败: {str(e)}")
+
+    async def send_email_individual_with_attachments(
+        self,
+        email_request: EmailWithAttachmentsRequest,
+        created_by: Optional[UUID] = None,
+        delay_between_sends: float = 0.5,
+    ) -> dict:
+        """
+        单独发送带附件的邮件（每个收件人收到独立的邮件）
+
+        Args:
+            email_request: 带附件的邮件发送请求
+            created_by: 创建者ID
+            delay_between_sends: 发送间隔（秒）
+
+        Returns:
+            Dict: 发送结果汇总
+        """
+        try:
+            to_emails = email_request.to_emails
+            total_recipients = len(to_emails)
+
+            logger.info(f"开始单独发送带附件邮件给 {total_recipients} 个收件人")
+
+            # 获取附件信息和文件路径
+            attachments_info = []
+            attachment_paths = {}
+
+            if email_request.attachment_ids:
+                for attachment_id in email_request.attachment_ids:
+                    # 这里需要实现从attachment_id获取附件信息的逻辑
+                    # 当前简化实现，在实际项目中应该有附件元数据表
+                    logger.warning(
+                        f"需要实现从attachment_id获取附件信息: {attachment_id}"
+                    )
+
+            # 获取SMTP设置
+            smtp_settings = await self.get_smtp_settings(
+                email_request.tenant_id, email_request.smtp_setting_id
+            )
+            if not smtp_settings:
+                raise ValueError("未找到可用的SMTP设置")
+
+            # 为整个批次创建一个主队列ID用于跟踪
+            batch_queue_id = uuid.uuid4()
+
+            # 存储所有单独发送的结果
+            individual_results = []
+            successful_sends = []
+            failed_sends = []
+
+            # 创建SMTP服务实例
+            class SMTPSettingsObj:
+                def __init__(self, data):
+                    for key, value in data.items():
+                        setattr(self, key, value)
+
+            smtp_settings_obj = SMTPSettingsObj(smtp_settings)
+            smtp_service = SMTPService(smtp_settings_obj)
+
+            # 循环单独发送每封邮件
+            for index, recipient_email in enumerate(to_emails):
+                try:
+                    logger.info(
+                        f"发送第 {index + 1}/{total_recipients} 封带附件邮件到: {recipient_email}"
+                    )
+
+                    # 创建单独的队列记录
+                    queue_item = await self._create_individual_queue_item(
+                        email_request,
+                        recipient_email,
+                        batch_queue_id,
+                        created_by,
+                        index + 1,
+                    )
+
+                    # 发送单独邮件（带附件）
+                    result = await smtp_service.send_email(
+                        to_emails=[recipient_email],  # 只发给一个收件人
+                        subject=email_request.subject,
+                        body_text=email_request.body_text,
+                        body_html=email_request.body_html,
+                        attachments=attachments_info,
+                        attachment_paths=attachment_paths,
+                    )
+
+                    # 更新队列状态
+                    await self._update_individual_queue_status(
+                        queue_item["id"], result, email_request.tenant_id
+                    )
+
+                    individual_results.append(
+                        {
+                            "recipient": recipient_email,
+                            "queue_id": queue_item["id"],
+                            "status": result["status"],
+                            "message": result.get("message", ""),
+                            "attachment_count": len(attachments_info),
+                            "index": index + 1,
+                        }
+                    )
+
+                    if result["status"] == "success":
+                        successful_sends.append(recipient_email)
+                        logger.info(
+                            f"✅ 第 {index + 1} 封带附件邮件发送成功: {recipient_email}"
+                        )
+                    else:
+                        failed_sends.append(
+                            {
+                                "email": recipient_email,
+                                "error": result.get("error", "Unknown error"),
+                            }
+                        )
+                        logger.error(
+                            f"❌ 第 {index + 1} 封带附件邮件发送失败: {recipient_email} - {result.get('error', '')}"
+                        )
+
+                    # 发送间隔
+                    if index < total_recipients - 1:
+                        await asyncio.sleep(delay_between_sends)
+
+                except Exception as e:
+                    logger.error(f"发送带附件邮件给 {recipient_email} 异常: {str(e)}")
+                    failed_sends.append({"email": recipient_email, "error": str(e)})
+                    individual_results.append(
+                        {
+                            "recipient": recipient_email,
+                            "queue_id": None,
+                            "status": "error",
+                            "message": str(e),
+                            "attachment_count": len(attachments_info),
+                            "index": index + 1,
+                        }
+                    )
+
+            # 创建批次汇总记录
+            await self._create_batch_summary_record(
+                batch_queue_id, email_request, individual_results, created_by
+            )
+
+            # 生成汇总结果
+            success_count = len(successful_sends)
+            failed_count = len(failed_sends)
+            success_rate = (
+                (success_count / total_recipients * 100) if total_recipients > 0 else 0
+            )
+
+            overall_status = (
+                "success"
+                if failed_count == 0
+                else "partial" if success_count > 0 else "failed"
+            )
+
+            return {
+                "queue_id": batch_queue_id,
+                "status": overall_status,
+                "message": f"单独发送带附件邮件完成: {success_count} 成功, {failed_count} 失败",
+                "to_emails": to_emails,
+                "scheduled_at": email_request.scheduled_at,
+                "attachment_count": len(attachments_info),
+                "individual_results": individual_results,
+                "summary": {
+                    "total_recipients": total_recipients,
+                    "successful_sends": success_count,
+                    "failed_sends": failed_count,
+                    "success_rate": round(success_rate, 2),
+                    "successful_emails": successful_sends,
+                    "failed_emails": failed_sends,
+                },
+            }
+
+        except Exception as e:
+            logger.error(f"单独发送带附件邮件失败: {str(e)}")
+            raise Exception(f"单独发送邮件失败: {str(e)}")
+
+    async def _create_individual_queue_item(
+        self,
+        email_request: Union[EmailSendRequest, EmailWithAttachmentsRequest],
+        recipient_email: str,
+        batch_queue_id: UUID,
+        created_by: Optional[UUID],
+        sequence_number: int,
+    ) -> Dict[str, Any]:
+        """为单独发送创建队列项"""
+
+        # 准备附件信息
+        attachments_data = {}
+        if hasattr(email_request, "attachment_ids") and email_request.attachment_ids:
+            attachments_data = {
+                "attachment_ids": email_request.attachment_ids,
+                "attachment_count": len(email_request.attachment_ids),
+            }
+
+        # 创建队列项
+        async with get_db_connection() as conn:
+            queue_id = await conn.fetchval(
+                """
+                INSERT INTO email_sending_queue (
+                    tenant_id, to_emails, subject, body_text, body_html,
+                    smtp_setting_id, priority, scheduled_at, 
+                    related_project_id, related_engineer_id,
+                    email_metadata, attachments, created_by
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                RETURNING id
+                """,
+                email_request.tenant_id,
+                [recipient_email],  # 只有一个收件人
+                email_request.subject,
+                email_request.body_text,
+                email_request.body_html,
+                email_request.smtp_setting_id,
+                email_request.priority,
+                email_request.scheduled_at or datetime.utcnow(),
+                email_request.related_project_id,
+                email_request.related_engineer_id,
+                json.dumps(
+                    {
+                        **(email_request.metadata or {}),
+                        "batch_queue_id": str(batch_queue_id),
+                        "sequence_number": sequence_number,
+                        "send_type": "individual",
+                        **attachments_data,
+                    }
+                ),
+                json.dumps(attachments_data),
+                created_by,
+            )
+
+            # 获取创建的记录
+            queue_item = await conn.fetchrow(
+                "SELECT * FROM email_sending_queue WHERE id = $1", queue_id
+            )
+
+        return dict(queue_item)
+
+    async def _update_individual_queue_status(
+        self, queue_id: UUID, send_result: Dict[str, Any], tenant_id: UUID
+    ) -> None:
+        """更新单独发送的队列状态"""
+
+        async with get_db_connection() as conn:
+            if send_result["status"] == "success":
+                await conn.execute(
+                    """
+                    UPDATE email_sending_queue 
+                    SET status = 'sent', sent_at = $1, send_duration_ms = $2, last_attempt_at = $3
+                    WHERE id = $4
+                    """,
+                    datetime.utcnow(),
+                    int(send_result.get("send_duration_seconds", 0) * 1000),
+                    datetime.utcnow(),
+                    queue_id,
+                )
+            else:
+                await conn.execute(
+                    """
+                    UPDATE email_sending_queue 
+                    SET status = 'failed', error_message = $1, last_attempt_at = $2
+                    WHERE id = $3
+                    """,
+                    send_result.get("error", ""),
+                    datetime.utcnow(),
+                    queue_id,
+                )
+
+            # 创建详细日志记录
+            await conn.execute(
+                """
+                INSERT INTO email_sending_logs (
+                    queue_id, tenant_id, message_id, smtp_response, delivery_status,
+                    send_start_time, send_end_time, response_time_ms
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                """,
+                queue_id,
+                tenant_id,
+                send_result.get("message_id", ""),
+                send_result.get("smtp_response", ""),
+                send_result["status"],
+                datetime.utcnow(),
+                datetime.utcnow(),
+                int(send_result.get("send_duration_seconds", 0) * 1000),
+            )
+
+    async def _create_batch_summary_record(
+        self,
+        batch_queue_id: UUID,
+        email_request: Union[EmailSendRequest, EmailWithAttachmentsRequest],
+        individual_results: List[Dict[str, Any]],
+        created_by: Optional[UUID],
+    ) -> None:
+        """创建批次汇总记录"""
+
+        # 统计信息
+        total_count = len(individual_results)
+        success_count = sum(1 for r in individual_results if r["status"] == "success")
+        failed_count = total_count - success_count
+
+        # 汇总状态
+        if failed_count == 0:
+            batch_status = "sent"
+        elif success_count == 0:
+            batch_status = "failed"
+        else:
+            batch_status = "partial"
+
+        # 创建汇总记录
+        async with get_db_connection() as conn:
+            await conn.execute(
+                """
+                INSERT INTO email_sending_queue (
+                    id, tenant_id, to_emails, subject, body_text, body_html,
+                    smtp_setting_id, priority, scheduled_at, 
+                    status, sent_at, email_metadata, created_by
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                """,
+                batch_queue_id,
+                email_request.tenant_id,
+                email_request.to_emails,  # 原始收件人列表
+                f"[批量单独发送] {email_request.subject}",
+                email_request.body_text,
+                email_request.body_html,
+                email_request.smtp_setting_id,
+                email_request.priority,
+                email_request.scheduled_at or datetime.utcnow(),
+                batch_status,
+                datetime.utcnow() if success_count > 0 else None,
+                json.dumps(
+                    {
+                        "send_type": "individual_batch",
+                        "total_recipients": total_count,
+                        "successful_sends": success_count,
+                        "failed_sends": failed_count,
+                        "individual_results": individual_results,
+                        **(email_request.metadata or {}),
+                    }
+                ),
+                created_by,
+            )

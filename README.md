@@ -1,101 +1,90 @@
-# 邮件发送API系统
+# 🚀 多租户邮件发送API系统
 
-一个功能强大的多租户邮件发送系统，基于FastAPI构建，支持附件上传、SMTP配置管理、邮件队列、发送状态跟踪等完整功能。
+[![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://python.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-green.svg)](https://fastapi.tiangolo.com)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15+-blue.svg)](https://postgresql.org)
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://docker.com)
 
-## 📋 目录
+一个功能强大的企业级多租户邮件发送API系统，基于FastAPI构建，支持高并发邮件发送、SMTP配置管理、附件处理、队列管理和实时统计分析。
 
-- [功能特性](#功能特性)
-- [系统架构](#系统架构)
-- [快速开始](#快速开始)
-- [API文档](#api文档)
-- [配置说明](#配置说明)
-- [部署指南](#部署指南)
-- [开发指南](#开发指南)
-- [故障排除](#故障排除)
-- [许可证](#许可证)
+## ✨ 核心特性
 
-## ✨ 功能特性
+### 🎯 邮件发送服务
+- **高性能发送**：基于asyncpg连接池的异步邮件发送
+- **多租户支持**：完整的租户隔离和数据安全保障
+- **智能队列**：支持优先级、重试机制和调度发送
+- **批量发送**：支持个性化内容的大批量邮件发送
+- **实时跟踪**：完整的发送状态跟踪和日志记录
 
-### 🚀 核心功能
+### 🔧 SMTP管理
+- **多账户管理**：支持多个SMTP服务商配置
+- **密码安全**：使用Fernet加密算法保护SMTP密码
+- **兼容性强**：与aimachingmail项目完全兼容
+- **连接测试**：一键测试SMTP连接状态
+- **负载均衡**：智能选择最优SMTP服务器
 
-- **多租户支持** - 完整的租户隔离机制
-- **SMTP配置管理** - 支持多种SMTP服务商，密码加密存储
-- **单发/群发邮件** - 支持单个收件人和批量发送
-- **附件支持** - 完整的文件上传、验证、存储和发送功能
-- **邮件队列** - 异步邮件发送队列，支持优先级和重试
-- **发送状态跟踪** - 实时跟踪邮件发送状态和日志
+### 📎 附件处理
+- **多格式支持**：支持25+种文件格式
+- **安全验证**：多层文件安全检查和病毒扫描
+- **批量上传**：支持一次性上传多个附件
+- **存储管理**：自动清理过期文件和存储优化
+- **CDN加速**：支持附件CDN分发（可选）
 
-### 🔒 安全特性
+### 📊 统计分析
+- **实时监控**：邮件发送成功率、失败率实时统计
+- **性能分析**：发送耗时、队列状态分析
+- **数据可视化**：支持图表展示和数据导出
+- **告警通知**：异常情况自动告警
+- **历史追踪**：完整的邮件发送历史记录
 
-- **密码加密** - 使用Fernet加密算法保护SMTP密码
-- **文件验证** - 多层文件安全验证，防止恶意文件上传
-- **访问控制** - 基于租户的数据隔离
-- **安全头部** - 完整的HTTP安全头部配置
-- **速率限制** - API请求速率限制和防护
+## 🏗️ 技术架构
 
-### 📊 管理功能
-
-- **邮件模板** - 支持动态邮件模板和变量替换
-- **统计报告** - 发送成功率、失败统计等分析
-- **日志审计** - 完整的操作日志和邮件发送记录
-- **健康监控** - 系统健康检查和性能监控
-
-### 🛠 技术特性
-
-- **异步处理** - 基于asyncio的高性能异步处理
-- **数据库支持** - 支持PostgreSQL和SQLite
-- **缓存机制** - Redis缓存提升性能
-- **容器化** - 完整的Docker支持
-- **可扩展性** - 微服务架构，易于扩展
-
-## 🏗 系统架构
-
+```mermaid
+graph TB
+    A[客户端应用] --> B[负载均衡器]
+    B --> C[FastAPI服务集群]
+    C --> D[asyncpg连接池]
+    D --> E[PostgreSQL数据库]
+    C --> F[Redis缓存]
+    C --> G[文件存储]
+    C --> H[SMTP服务商]
+    
+    subgraph "核心服务"
+        C1[邮件发送服务]
+        C2[SMTP管理服务]
+        C3[附件管理服务]
+        C4[队列管理服务]
+        C5[统计分析服务]
+    end
 ```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   前端应用      │    │   移动应用      │    │   第三方系统    │
-│  (React/Vue)    │    │ (React Native)  │    │     (API)       │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-         │                       │                       │
-         └───────────────────────┼───────────────────────┘
-                                 │
-                    ┌─────────────────┐
-                    │   Nginx/LB      │  ← 负载均衡
-                    └─────────────────┘
-                                 │
-                    ┌─────────────────┐
-                    │   FastAPI       │  ← 主应用
-                    │   (Email API)   │
-                    └─────────────────┘
-                                 │
-                 ┌───────────────┼───────────────┐
-                 │               │               │
-    ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
-    │   PostgreSQL    │ │     Redis       │ │   文件存储      │
-    │   (数据库)      │ │   (缓存/队列)   │ │  (附件存储)     │
-    └─────────────────┘ └─────────────────┘ └─────────────────┘
-```
+
+### 核心技术栈
+- **后端框架**：FastAPI 0.104+ (异步高性能)
+- **数据库**：PostgreSQL 15+ (asyncpg连接池)
+- **缓存**：Redis 6+ (可选)
+- **邮件发送**：aiosmtplib (异步SMTP)
+- **加密算法**：Fernet (AES 128位加密)
+- **文件处理**：多格式支持和安全验证
+- **容器化**：Docker + Docker Compose
 
 ## 🚀 快速开始
 
-### 1. 环境要求
-
+### 环境要求
 - Python 3.11+
-- PostgreSQL 13+ 或 SQLite
+- PostgreSQL 15+
 - Redis 6+ (可选)
 - Docker & Docker Compose (推荐)
 
-### 2. 使用Docker快速部署
+### 1. Docker快速部署（推荐）
 
 ```bash
 # 克隆项目
-git clone https://github.com/yourusername/email-api.git
-cd email-api
+git clone https://github.com/yourusername/email-api-system.git
+cd email-api-system
 
-# 复制环境变量配置
-cp .env.example .env
-
-# 编辑配置文件（必须修改数据库密码和密钥）
-vim .env
+# 生成配置文件
+python generate_keys.py
 
 # 启动服务
 docker-compose up -d
@@ -107,13 +96,9 @@ docker-compose ps
 docker-compose logs -f email-api
 ```
 
-### 3. 本地开发环境
+### 2. 本地开发环境
 
 ```bash
-# 克隆项目
-git clone https://github.com/yourusername/email-api.git
-cd email-api
-
 # 创建虚拟环境
 python -m venv venv
 source venv/bin/activate  # Linux/Mac
@@ -124,7 +109,7 @@ pip install -r requirements.txt
 
 # 配置环境变量
 cp .env.example .env
-# 编辑 .env 文件
+# 编辑 .env 文件，设置数据库连接等配置
 
 # 启动数据库（使用Docker）
 docker run -d \
@@ -139,25 +124,32 @@ docker run -d \
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### 4. 验证安装
+### 3. 验证安装
 
 访问以下URL验证系统运行状态：
 
-- API文档: http://localhost:8000/docs
-- 健康检查: http://localhost:8000/health
-- 系统信息: http://localhost:8000/info
+```bash
+# API文档
+curl http://localhost:8000/docs
+
+# 健康检查
+curl http://localhost:8000/health
+
+# 快速功能测试
+curl http://localhost:8000/quick-test
+
+# SMTP解密服务测试
+curl http://localhost:8000/api/v1/smtp/health
+```
 
 ## 📚 API文档
 
-### 主要API端点
+### 核心API端点
 
-#### SMTP配置管理
-
+#### 🔧 SMTP配置管理
 ```http
 # 创建SMTP配置
 POST /api/v1/email/smtp-settings
-Content-Type: application/json
-
 {
     "tenant_id": "uuid",
     "setting_name": "Gmail SMTP",
@@ -167,45 +159,37 @@ Content-Type: application/json
     "smtp_password": "your-app-password",
     "security_protocol": "TLS",
     "from_email": "your-email@gmail.com",
-    "from_name": "发送者名称",
-    "is_default": true
+    "from_name": "发送者名称"
 }
 
-# 获取SMTP配置列表
-GET /api/v1/email/smtp-settings/{tenant_id}
+# 获取SMTP配置（含解密密码）
+GET /api/v1/smtp/config/{tenant_id}/default
 
 # 测试SMTP连接
-POST /api/v1/email/smtp-settings/test
+POST /api/v1/smtp/test
+{
+    "tenant_id": "uuid",
+    "setting_id": "uuid"
+}
 ```
 
-#### 附件管理
-
+#### 📎 附件管理
 ```http
-# 上传单个附件
+# 上传附件
 POST /api/v1/email/attachments/upload
 Content-Type: multipart/form-data
 
-tenant_id: uuid
-file: [binary]
-
 # 批量上传附件
 POST /api/v1/email/attachments/upload-multiple
-Content-Type: multipart/form-data
 
-tenant_id: uuid
-files: [binary array]
-
-# 删除附件
-DELETE /api/v1/email/attachments/{tenant_id}/{attachment_id}?filename=file.pdf
+# 获取附件列表
+GET /api/v1/email/attachments/{tenant_id}
 ```
 
-#### 邮件发送
-
+#### 📧 邮件发送
 ```http
 # 发送普通邮件
 POST /api/v1/email/send
-Content-Type: application/json
-
 {
     "tenant_id": "uuid",
     "to_emails": ["recipient@example.com"],
@@ -215,10 +199,8 @@ Content-Type: application/json
     "priority": 5
 }
 
-# 发送带附件的邮件
+# 发送带附件邮件
 POST /api/v1/email/send-with-attachments
-Content-Type: application/json
-
 {
     "tenant_id": "uuid",
     "to_emails": ["recipient@example.com"],
@@ -226,71 +208,63 @@ Content-Type: application/json
     "body_text": "邮件内容",
     "attachment_ids": ["attachment-uuid-1", "attachment-uuid-2"]
 }
-
-# 批量发送邮件
-POST /api/v1/email/send-bulk
 ```
 
-#### 状态查询
-
+#### 📊 队列和统计
 ```http
 # 查询邮件状态
 GET /api/v1/email/queue/{tenant_id}/{queue_id}
-
-# 获取邮件队列列表
-GET /api/v1/email/queue/{tenant_id}?limit=50&offset=0
 
 # 获取发送统计
 GET /api/v1/email/statistics/{tenant_id}?days=30
 ```
 
 ### 完整API文档
-
-启动服务后访问 http://localhost:8000/docs 查看完整的交互式API文档。
+启动服务后访问 `http://localhost:8000/docs` 查看完整的交互式API文档。
 
 ## ⚙️ 配置说明
 
 ### 环境变量配置
-
-主要配置项说明：
 
 ```bash
 # 数据库配置
 DATABASE_URL="postgresql://user:pass@host:5432/dbname"
 
 # 安全配置
-SECRET_KEY="your-secret-key"  # JWT签名密钥
-ENCRYPTION_KEY="your-fernet-key"  # SMTP密码加密密钥
+SECRET_KEY="your-secret-key"
+ENCRYPTION_KEY="your-fernet-key"  # 用于SMTP密码加密
 
 # 文件上传限制
 MAX_FILE_SIZE=26214400  # 25MB
 MAX_FILES_PER_REQUEST=10
-MAX_TOTAL_REQUEST_SIZE=104857600  # 100MB
 
 # 邮件发送限制
 MAX_RECIPIENTS_PER_EMAIL=100
 MAX_BULK_EMAILS=1000
-EMAIL_TIMEOUT_SECONDS=60
 
-# 前端CORS配置
+# CORS配置
 BACKEND_CORS_ORIGINS='["http://localhost:3000","https://yourdomain.com"]'
 ```
 
 ### SMTP服务商配置示例
 
-#### Gmail配置
+<details>
+<summary>📧 Gmail配置</summary>
 
 ```json
 {
     "smtp_host": "smtp.gmail.com",
     "smtp_port": 587,
     "smtp_username": "your-email@gmail.com",
-    "smtp_password": "your-app-password",  // 需要开启2FA并生成应用密码
+    "smtp_password": "your-app-password",
     "security_protocol": "TLS"
 }
 ```
+> 注意：Gmail需要开启2FA并生成应用专用密码
+</details>
 
-#### Outlook配置
+<details>
+<summary>📧 Outlook配置</summary>
 
 ```json
 {
@@ -301,138 +275,38 @@ BACKEND_CORS_ORIGINS='["http://localhost:3000","https://yourdomain.com"]'
     "security_protocol": "TLS"
 }
 ```
+</details>
 
-#### 企业邮箱配置
+<details>
+<summary>📧 企业邮箱配置</summary>
 
 ```json
 {
-    "smtp_host": "smtp.exmail.qq.com",  // 腾讯企业邮箱
+    "smtp_host": "smtp.exmail.qq.com",
     "smtp_port": 587,
     "smtp_username": "your-email@yourdomain.com",
     "smtp_password": "your-password",
     "security_protocol": "TLS"
 }
 ```
+</details>
 
 ## 🚀 部署指南
 
-### Docker部署（推荐）
-
-#### 1. 基础部署
-
-```bash
-# 克隆代码
-git clone https://github.com/yourusername/email-api.git
-cd email-api
-
-# 配置环境变量
-cp .env.example .env
-vim .env  # 修改必要的配置
-
-# 构建并启动
-docker-compose up -d
-
-# 检查服务状态
-docker-compose ps
-docker-compose logs -f
-```
-
-#### 2. 生产环境部署
+### Docker部署（生产环境）
 
 ```bash
 # 使用生产配置
 docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 
-# 包含所有服务（队列、监控等）
-docker-compose --profile production --profile queue --profile monitoring up -d
-```
-
-#### 3. 扩容部署
-
-```bash
-# 水平扩展API服务
+# 扩容部署
 docker-compose up -d --scale email-api=3
 
 # 使用负载均衡
 docker-compose --profile production up -d
 ```
 
-### 手动部署
-
-#### 1. 系统准备
-
-```bash
-# Ubuntu/Debian
-sudo apt update
-sudo apt install python3.11 python3.11-venv postgresql redis-server nginx
-
-# CentOS/RHEL
-sudo yum install python3.11 postgresql-server redis nginx
-```
-
-#### 2. 应用部署
-
-```bash
-# 创建用户
-sudo useradd -m -s /bin/bash emailapi
-
-# 部署代码
-sudo -u emailapi git clone https://github.com/yourusername/email-api.git /home/emailapi/app
-cd /home/emailapi/app
-
-# 安装依赖
-sudo -u emailapi python3.11 -m venv venv
-sudo -u emailapi venv/bin/pip install -r requirements.txt
-
-# 配置环境变量
-sudo -u emailapi cp .env.example .env
-sudo -u emailapi vim .env
-
-# 配置systemd服务
-sudo cp deployment/email-api.service /etc/systemd/system/
-sudo systemctl enable email-api
-sudo systemctl start email-api
-```
-
-#### 3. Nginx配置
-
-```nginx
-# /etc/nginx/sites-available/email-api
-server {
-    listen 80;
-    server_name your-domain.com;
-    
-    location / {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-    
-    location /uploads/ {
-        alias /home/emailapi/app/uploads/;
-        expires 1d;
-    }
-}
-```
-
-### 云平台部署
-
-#### AWS ECS部署
-
-```bash
-# 构建并推送镜像到ECR
-aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 123456789.dkr.ecr.us-east-1.amazonaws.com
-docker build -t email-api .
-docker tag email-api:latest 123456789.dkr.ecr.us-east-1.amazonaws.com/email-api:latest
-docker push 123456789.dkr.ecr.us-east-1.amazonaws.com/email-api:latest
-
-# 使用提供的ECS任务定义文件
-aws ecs register-task-definition --cli-input-json file://deployment/ecs-task-definition.json
-```
-
-#### Kubernetes部署
+### Kubernetes部署
 
 ```bash
 # 应用Kubernetes配置
@@ -443,40 +317,143 @@ kubectl get pods -l app=email-api
 kubectl get services
 ```
 
-## 👨‍💻 开发指南
+### 云平台部署
+
+<details>
+<summary>☁️ AWS ECS部署</summary>
+
+```bash
+# 构建并推送镜像到ECR
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 123456789.dkr.ecr.us-east-1.amazonaws.com
+docker build -t email-api .
+docker tag email-api:latest 123456789.dkr.ecr.us-east-1.amazonaws.com/email-api:latest
+docker push 123456789.dkr.ecr.us-east-1.amazonaws.com/email-api:latest
+```
+</details>
+
+## 🔒 安全特性
+
+### 密码加密
+- 使用Fernet对称加密算法
+- 与aimachingmail项目完全兼容
+- 支持密钥轮换和升级
+
+### 文件安全
+- 多层文件类型验证
+- 病毒扫描集成
+- 文件大小和数量限制
+- 安全文件名处理
+
+### 访问控制
+- 基于租户的数据隔离
+- API密钥认证
+- 速率限制保护
+- SQL注入防护
+
+## 📊 性能特性
+
+### 高并发支持
+- asyncpg连接池：支持1000+并发连接
+- 异步邮件发送：支持每秒1000+邮件发送
+- 智能队列：支持百万级邮件队列
+
+### 性能优化
+- 数据库连接池优化
+- Redis缓存加速
+- CDN文件分发
+- 压缩和缓存策略
+
+## 🔧 故障排除
+
+### 常见问题
+
+<details>
+<summary>🚨 SMTP连接失败</summary>
+
+**问题**：SMTP连接测试失败
+
+**解决方案**：
+```bash
+# 检查SMTP配置
+curl -X POST "http://localhost:8000/api/v1/smtp/test" \
+  -H "Content-Type: application/json" \
+  -d '{"tenant_id": "your-tenant-id", "setting_id": "your-setting-id"}'
+
+# 验证网络连接
+telnet smtp.gmail.com 587
+
+# 检查防火墙设置
+sudo ufw status
+```
+</details>
+
+<details>
+<summary>🚨 文件上传失败</summary>
+
+**问题**：附件上传失败或文件过大
+
+**解决方案**：
+```bash
+# 检查文件大小限制
+echo "当前限制: 25MB"
+
+# 检查磁盘空间
+df -h
+
+# 检查上传目录权限
+ls -la uploads/attachments/
+```
+</details>
+
+<details>
+<summary>🚨 数据库连接问题</summary>
+
+**问题**：无法连接到数据库
+
+**解决方案**：
+```bash
+# 测试数据库连接
+psql "postgresql://user:pass@host:5432/dbname"
+
+# 检查数据库服务状态
+sudo systemctl status postgresql
+
+# 查看连接池状态
+curl http://localhost:8000/health
+```
+</details>
+
+### 日志分析
+
+```bash
+# 查看应用日志
+docker-compose logs -f email-api
+
+# 查看错误日志
+grep "ERROR" logs/app.log
+
+# 实时监控
+tail -f logs/app.log | grep -E "(ERROR|WARNING)"
+```
+
+## 🤝 开发指南
 
 ### 项目结构
-
 ```
 email_api/
 ├── app/
-│   ├── __init__.py
-│   ├── main.py                 # FastAPI应用入口
-│   ├── config.py               # 配置管理
-│   ├── database.py             # 数据库连接
-│   ├── models/
-│   │   ├── __init__.py
-│   │   └── email_models.py     # 数据模型
-│   ├── schemas/
-│   │   ├── __init__.py
-│   │   └── email_schemas.py    # 请求/响应模型
-│   ├── services/
-│   │   ├── __init__.py
-│   │   ├── email_service.py    # 邮件业务逻辑
-│   │   └── smtp_service.py     # SMTP服务
-│   ├── api/
-│   │   ├── __init__.py
-│   │   └── email_routes.py     # API路由
-│   └── utils/
-│       ├── __init__.py
-│       └── security.py         # 安全工具
-├── tests/                      # 测试文件
-├── deployment/                 # 部署配置
-├── docs/                       # 文档
-├── requirements.txt            # Python依赖
-├── docker-compose.yml          # Docker编排
-├── Dockerfile                  # Docker构建
-└── README.md                   # 项目说明
+│   ├── main.py              # FastAPI应用入口
+│   ├── config.py            # 配置管理
+│   ├── database.py          # asyncpg数据库连接
+│   ├── models/              # 数据模型
+│   ├── schemas/             # 请求/响应模型
+│   ├── services/            # 业务逻辑
+│   ├── api/                 # API路由
+│   └── utils/               # 工具函数
+├── tests/                   # 测试文件
+├── deployment/              # 部署配置
+├── docker-compose.yml       # Docker编排
+└── requirements.txt         # Python依赖
 ```
 
 ### 开发环境设置
@@ -493,194 +470,105 @@ isort app/
 mypy app/
 
 # 运行测试
-pytest
-
-# 生成测试覆盖率报告
-pytest --cov=app --cov-report=html
+pytest --cov=app
 ```
 
 ### 添加新功能
 
-1. **数据模型** - 在 `models/` 中定义SQLAlchemy模型
-2. **请求模型** - 在 `schemas/` 中定义Pydantic模型
-3. **业务逻辑** - 在 `services/` 中实现业务逻辑
-4. **API路由** - 在 `api/` 中添加FastAPI路由
-5. **测试** - 在 `tests/` 中添加测试用例
+1. **数据模型**：在 `models/` 中定义SQLAlchemy模型
+2. **请求模型**：在 `schemas/` 中定义Pydantic模型
+3. **业务逻辑**：在 `services/` 中实现业务逻辑
+4. **API路由**：在 `api/` 中添加FastAPI路由
+5. **测试用例**：在 `tests/` 中添加测试用例
 
-### 数据库迁移
+## 🔗 集成指南
 
-```bash
-# 生成迁移文件
-alembic revision --autogenerate -m "Add new feature"
+### 与aimachingmail项目集成
 
-# 应用迁移
-alembic upgrade head
+本系统完全兼容aimachingmail项目，可作为SMTP配置和密码解密服务使用：
 
-# 回滚迁移
-alembic downgrade -1
+```python
+# 从aimachingmail调用SMTP配置
+import requests
+
+# 获取默认SMTP配置（含解密密码）
+response = requests.get(
+    f"http://your-email-api:8000/api/v1/smtp/config/{tenant_id}/default"
+)
+smtp_config = response.json()
+
+# 直接用于SMTP连接
+smtp = aiosmtplib.SMTP(
+    hostname=smtp_config['smtp_host'],
+    port=smtp_config['smtp_port'],
+    use_tls=smtp_config['security_protocol'] == 'TLS'
+)
 ```
 
-### 测试
+### React Native集成示例
 
-```bash
-# 运行所有测试
-pytest
+详见 `examples/react-native-example.js` 文件，包含完整的移动端集成示例。
 
-# 运行特定测试
-pytest tests/test_email_service.py
+## 📈 监控和告警
 
-# 运行并生成覆盖率报告
-pytest --cov=app
+### 性能监控
+- 邮件发送成功率监控
+- API响应时间监控
+- 数据库连接池状态监控
+- 文件存储使用情况监控
 
-# 性能测试
-pytest tests/performance/
-```
+### 告警配置
+- SMTP连接失败告警
+- 邮件发送失败率告警
+- 系统资源使用告警
+- 安全异常行为告警
 
-## 🔧 故障排除
+## 🛣️ 发展路线图
 
-### 常见问题
+### v2.1（计划中）
+- [ ] 邮件模板系统
+- [ ] Webhook回调支持
+- [ ] 多语言邮件支持
+- [ ] 高级统计报表
 
-#### 1. SMTP连接失败
+### v2.2（计划中）
+- [ ] 人工智能反垃圾邮件
+- [ ] 邮件个性化推荐
+- [ ] 区块链邮件验证
+- [ ] 边缘节点部署
 
-**问题**: SMTP连接测试失败
-
-**解决方案**:
-- 检查SMTP服务器地址和端口
-- 验证用户名和密码
-- 确认安全协议设置（TLS/SSL）
-- 检查防火墙设置
-- 对于Gmail，确保使用应用密码
-
-```bash
-# 测试SMTP连接
-curl -X POST "http://localhost:8000/api/v1/email/smtp-settings/test" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "tenant_id": "your-tenant-id",
-    "smtp_setting_id": "your-smtp-setting-id"
-  }'
-```
-
-#### 2. 文件上传失败
-
-**问题**: 附件上传失败或文件过大
-
-**解决方案**:
-- 检查文件大小是否超过限制（默认25MB）
-- 验证文件类型是否在允许列表中
-- 检查磁盘空间
-- 确认上传目录权限
-
-```bash
-# 检查上传目录
-ls -la uploads/attachments/
-df -h  # 检查磁盘空间
-```
-
-#### 3. 数据库连接问题
-
-**问题**: 无法连接到数据库
-
-**解决方案**:
-- 检查数据库服务是否运行
-- 验证连接字符串格式
-- 检查数据库用户权限
-- 确认网络连接
-
-```bash
-# 测试数据库连接
-psql "postgresql://user:pass@host:5432/dbname"
-
-# 检查数据库服务状态
-sudo systemctl status postgresql
-```
-
-#### 4. 邮件发送超时
-
-**问题**: 邮件发送超时或失败
-
-**解决方案**:
-- 增加超时时间设置
-- 检查网络连接
-- 验证SMTP服务器状态
-- 检查邮件内容大小
-
-#### 5. 性能问题
-
-**问题**: API响应慢或超时
-
-**解决方案**:
-- 启用Redis缓存
-- 优化数据库查询
-- 增加工作进程数
-- 使用CDN加速静态文件
-
-### 日志分析
-
-```bash
-# 查看应用日志
-docker-compose logs -f email-api
-
-# 查看错误日志
-grep "ERROR" logs/app.log
-
-# 查看SMTP相关日志
-grep "SMTP" logs/app.log
-
-# 实时监控日志
-tail -f logs/app.log | grep -E "(ERROR|WARNING)"
-```
-
-### 监控和告警
-
-```bash
-# 检查系统状态
-curl http://localhost:8000/health
-
-# 检查邮件队列状态
-curl http://localhost:8000/api/v1/email/queue/{tenant_id}
-
-# 检查统计信息
-curl http://localhost:8000/api/v1/email/statistics/{tenant_id}
-```
-
-## 🤝 贡献指南
-
-1. Fork 本项目
-2. 创建功能分支 (`git checkout -b feature/amazing-feature`)
-3. 提交更改 (`git commit -m 'Add amazing feature'`)
-4. 推送到分支 (`git push origin feature/amazing-feature`)
-5. 开启Pull Request
-
-### 代码规范
-
-- 使用Black进行代码格式化
-- 遵循PEP 8规范
-- 添加类型注解
-- 编写单元测试
-- 更新文档
+### v3.0（远期规划）
+- [ ] 微服务架构重构
+- [ ] GraphQL API支持
+- [ ] 实时邮件协作
+- [ ] 企业级SSO集成
 
 ## 📄 许可证
 
-本项目基于 MIT 许可证开源。详见 [LICENSE](LICENSE) 文件。
-
-## 📞 支持与联系
-
-- 📧 邮箱: support@email-api.com
-- 📖 文档: https://docs.email-api.com
-- 🐛 问题报告: https://github.com/yourusername/email-api/issues
-- 💬 讨论: https://github.com/yourusername/email-api/discussions
+本项目基于 [MIT 许可证](LICENSE) 开源。
 
 ## 🙏 致谢
 
-感谢以下开源项目：
+感谢以下开源项目的支持：
 
 - [FastAPI](https://fastapi.tiangolo.com/) - 现代高性能Web框架
-- [SQLAlchemy](https://www.sqlalchemy.org/) - Python SQL工具包
-- [Pydantic](https://pydantic-docs.helpmanual.io/) - 数据验证库
+- [asyncpg](https://github.com/MagicStack/asyncpg) - 高性能PostgreSQL驱动
 - [aiosmtplib](https://aiosmtplib.readthedocs.io/) - 异步SMTP客户端
-- [Cryptography](https://cryptography.io/) - 加密库
+- [Cryptography](https://cryptography.io/) - 现代加密库
+
+## 📞 支持与联系
+
+- 📧 邮箱：support@email-api.com
+- 📖 文档：https://docs.email-api.com
+- 🐛 问题报告：https://github.com/yourusername/email-api-system/issues
+- 💬 讨论区：https://github.com/yourusername/email-api-system/discussions
 
 ---
 
-**如果这个项目对您有帮助，请给我们一个 ⭐️ Star！**
+**⭐ 如果这个项目对您有帮助，请给我们一个 Star！**
+
+<div align="center">
+  <img src="https://img.shields.io/github/stars/yourusername/email-api-system?style=social" alt="GitHub stars">
+  <img src="https://img.shields.io/github/forks/yourusername/email-api-system?style=social" alt="GitHub forks">
+  <img src="https://img.shields.io/github/watchers/yourusername/email-api-system?style=social" alt="GitHub watchers">
+</div>
