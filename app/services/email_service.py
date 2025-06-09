@@ -1,6 +1,7 @@
 # app/services/email_service.py - asyncpg版本
-from typing import List, Optional, Dict, Any, Tuple, Union
+import asyncio
 from uuid import UUID, uuid4
+from typing import List, Optional, Dict, Any, Tuple, Union
 from datetime import datetime, timedelta
 import os
 import shutil
@@ -8,7 +9,7 @@ from pathlib import Path
 import mimetypes
 import logging
 import json
-from uuid import UUID, uuid4
+
 
 from ..database import (
     get_db_connection,
@@ -67,7 +68,7 @@ class AttachmentManager:
         """
         try:
             # 生成唯一的文件ID
-            attachment_id = uuid4()
+            attachment_id = str(UUID())
 
             # 创建租户专属目录
             tenant_dir = self.base_path / str(tenant_id)
@@ -931,7 +932,7 @@ class EmailService:
                 raise ValueError("未找到可用的SMTP设置")
 
             # 为整个批次创建一个主队列ID用于跟踪
-            batch_queue_id = uuid.uuid4()
+            batch_queue_id = uuid4()
 
             # 存储所有单独发送的结果
             individual_results = []
