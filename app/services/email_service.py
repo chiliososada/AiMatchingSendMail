@@ -34,6 +34,7 @@ smtp_password_manager = SMTPPasswordManager()
 from .smtp_service import SMTPService
 from ..config import settings
 
+
 logger = logging.getLogger(__name__)
 
 
