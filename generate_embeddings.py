@@ -54,19 +54,8 @@ class EmbeddingGenerator:
             raise
 
     def create_project_paraphrase(self, project: Dict[str, Any]) -> str:
-        """创建项目的paraphrase文本"""
+        """创建项目的paraphrase文本 - 精简版"""
         parts = []
-
-        # 标题
-        if project.get("title"):
-            parts.append(f"项目: {project['title']}")
-
-        # 描述
-        if project.get("description"):
-            parts.append(f"描述: {project['description']}")
-
-        if project.get("detail_description"):
-            parts.append(f"详细描述: {project['detail_description']}")
 
         # 技能要求
         if project.get("skills"):
@@ -82,39 +71,19 @@ class EmbeddingGenerator:
         if project.get("experience"):
             parts.append(f"经验要求: {project['experience']}")
 
-        # 工作地点
-        if project.get("location"):
-            parts.append(f"工作地点: {project['location']}")
-
-        # 工作类型
-        if project.get("work_type"):
-            parts.append(f"工作类型: {project['work_type']}")
-
         # 日语水平
         if project.get("japanese_level"):
             parts.append(f"日语要求: {project['japanese_level']}")
 
-        # 预算
-        if project.get("budget"):
-            parts.append(f"预算: {project['budget']}")
-
-        # 公司类型
-        if project.get("company_type"):
-            parts.append(f"公司类型: {project['company_type']}")
-
-        # 客户公司
-        if project.get("client_company"):
-            parts.append(f"客户: {project['client_company']}")
+        # 如果没有任何内容，返回默认文本
+        if not parts:
+            return "项目信息不完整"
 
         return " | ".join(parts)
 
     def create_engineer_paraphrase(self, engineer: Dict[str, Any]) -> str:
-        """创建简历的paraphrase文本"""
+        """创建简历的paraphrase文本 - 精简版"""
         parts = []
-
-        # 基本信息
-        if engineer.get("name"):
-            parts.append(f"姓名: {engineer['name']}")
 
         # 技能
         if engineer.get("skills"):
@@ -122,57 +91,23 @@ class EmbeddingGenerator:
             if isinstance(skills, list):
                 parts.append(f"技能: {', '.join(skills)}")
 
-        # 经验
-        if engineer.get("experience"):
-            parts.append(f"经验: {engineer['experience']}")
-
-        # 工作经验
-        if engineer.get("work_experience"):
-            parts.append(f"工作经验: {engineer['work_experience']}")
-
-        # 工作范围
-        if engineer.get("work_scope"):
-            parts.append(f"工作范围: {engineer['work_scope']}")
-
-        # 日语水平
-        if engineer.get("japanese_level"):
-            parts.append(f"日语水平: {engineer['japanese_level']}")
-
-        # 英语水平
-        if engineer.get("english_level"):
-            parts.append(f"英语水平: {engineer['english_level']}")
-
-        # 当前状态
-        if engineer.get("current_status"):
-            parts.append(f"状态: {engineer['current_status']}")
-
-        # 公司类型
-        if engineer.get("company_type"):
-            parts.append(f"公司类型: {engineer['company_type']}")
-
-        # 国籍
-        if engineer.get("nationality"):
-            parts.append(f"国籍: {engineer['nationality']}")
-
-        # 学历
-        if engineer.get("education"):
-            parts.append(f"学历: {engineer['education']}")
-
-        # 认证
-        if engineer.get("certifications"):
-            certs = engineer["certifications"]
-            if isinstance(certs, list):
-                parts.append(f"认证: {', '.join(certs)}")
-
-        # 自我推荐
-        if engineer.get("self_promotion"):
-            parts.append(f"自我推荐: {engineer['self_promotion']}")
-
         # 技术关键词
         if engineer.get("technical_keywords"):
             keywords = engineer["technical_keywords"]
             if isinstance(keywords, list):
                 parts.append(f"技术关键词: {', '.join(keywords)}")
+
+        # 经验
+        if engineer.get("experience"):
+            parts.append(f"经验: {engineer['experience']}")
+
+        # 日语水平
+        if engineer.get("japanese_level"):
+            parts.append(f"日语水平: {engineer['japanese_level']}")
+
+        # 如果没有任何内容，返回默认文本
+        if not parts:
+            return "简历信息不完整"
 
         return " | ".join(parts)
 
