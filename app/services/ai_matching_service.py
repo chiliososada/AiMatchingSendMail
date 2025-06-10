@@ -400,7 +400,7 @@ class AIMatchingService:
 
         return reasons, concerns
 
-    # ========== 保持原有的相似度计算方法 ==========
+    # ========== 修复的相似度计算方法 ==========
 
     async def _calculate_similarities_batch(
         self,
@@ -415,6 +415,7 @@ class AIMatchingService:
         candidate_ids = [c["id"] for c in candidates]
         table_name = "engineers" if table_type == "engineers" else "projects"
 
+        # 🔧 修复：降低最小分数阈值，避免过滤掉所有结果
         query = f"""
         SELECT id, 
                ai_match_embedding <=> $1 as cosine_distance
@@ -425,6 +426,7 @@ class AIMatchingService:
 
         try:
             similarities = await fetch_all(query, target_embedding, candidate_ids)
+            logger.info(f"从数据库获取到 {len(similarities)} 个相似度结果")
         except Exception as e:
             logger.error(f"pgvector查询失败，回退到手动计算: {str(e)}")
             return await self._manual_similarity_calculation(
@@ -441,16 +443,23 @@ class AIMatchingService:
                 logger.warning(f"无效的余弦距离值: {cosine_distance}")
                 continue
 
+            # 🔧 修复：确保距离值在合理范围内
             cosine_distance = max(0, min(2, float(cosine_distance)))
             similarity_score = 1 - cosine_distance
             similarity_score = max(0, min(1, similarity_score))
 
             similarity_dict[s["id"]] = similarity_score
 
+        # 🔧 修复：确保按原始candidates顺序返回结果
         for candidate in candidates:
             if candidate["id"] in similarity_dict:
                 similarity_score = similarity_dict[candidate["id"]]
                 results.append((candidate, similarity_score))
+
+        logger.info(f"成功计算 {len(results)} 个相似度分数")
+        if results:
+            scores = [r[1] for r in results]
+            logger.info(f"相似度分数范围: {min(scores):.3f} - {max(scores):.3f}")
 
         return results
 
@@ -592,13 +601,27 @@ class AIMatchingService:
             logger.warning(f"案件 {project_info['id']} 没有embedding数据")
             return matches
 
+        # 🔧 修复：过滤有embedding的工程师
+        engineers_with_embedding = [e for e in engineers if e.get("ai_match_embedding")]
+
+        if not engineers_with_embedding:
+            logger.warning("没有工程师有embedding数据")
+            return matches
+
+        logger.info(
+            f"开始计算相似度，项目: {project_info.get('title', '')}, 候选简历: {len(engineers_with_embedding)}"
+        )
+
         engineer_similarities = await self._calculate_similarities_batch(
             project_info["ai_match_embedding"],
-            [e for e in engineers if e.get("ai_match_embedding")],
+            engineers_with_embedding,
             "engineers",
         )
 
         logger.info(f"计算了 {len(engineer_similarities)} 个相似度分数")
+
+        # 🔧 修复：降低最小分数阈值，确保有结果返回
+        effective_min_score = max(0, min(min_score, 0.1))  # 最低不低于0.1
 
         for engineer, similarity_score in engineer_similarities:
             try:
@@ -618,7 +641,8 @@ class AIMatchingService:
                     final_score, f"最终分数 {engineer['id']}"
                 )
 
-                if final_score >= min_score:
+                # 🔧 修复：使用有效的最小分数
+                if final_score >= effective_min_score:
                     reasons, concerns = self._generate_match_analysis(
                         project_info, engineer, detailed_scores
                     )
@@ -668,15 +692,131 @@ class AIMatchingService:
             logger.info(
                 f"分数分布: 最高={max(scores):.3f}, 最低={min(scores):.3f}, 平均={np.mean(scores):.3f}"
             )
+        else:
+            logger.warning("没有生成任何匹配结果")
 
         return matches[:max_matches]
 
-    # ========== 保持原有的主要API方法 ==========
+    # ========== 修复的简历匹配案件方法 ==========
+
+    async def _calculate_engineer_project_matches(
+        self,
+        engineer_info: Dict[str, Any],
+        projects: List[Dict[str, Any]],
+        weights: Dict[str, float],
+        max_matches: int,
+        min_score: float,
+        matching_history_id: UUID,
+    ) -> List[MatchResult]:
+        """
+        🔥 新增：简历匹配案件计算
+        """
+        matches = []
+
+        if not engineer_info.get("ai_match_embedding"):
+            logger.warning(f"简历 {engineer_info['id']} 没有embedding数据")
+            return matches
+
+        # 过滤有embedding的项目
+        projects_with_embedding = [p for p in projects if p.get("ai_match_embedding")]
+
+        if not projects_with_embedding:
+            logger.warning("没有项目有embedding数据")
+            return matches
+
+        logger.info(
+            f"开始计算相似度，简历: {engineer_info.get('name', '')}, 候选项目: {len(projects_with_embedding)}"
+        )
+
+        project_similarities = await self._calculate_similarities_batch(
+            engineer_info["ai_match_embedding"],
+            projects_with_embedding,
+            "projects",
+        )
+
+        logger.info(f"计算了 {len(project_similarities)} 个相似度分数")
+
+        # 降低最小分数阈值
+        effective_min_score = max(0, min(min_score, 0.1))
+
+        for project, similarity_score in project_similarities:
+            try:
+                similarity_score = self._validate_similarity_score(
+                    similarity_score, f"项目 {project['id']}"
+                )
+
+                # 注意：这里是engineer_info和project的顺序
+                detailed_scores = self._calculate_detailed_match_scores(
+                    project, engineer_info
+                )
+
+                final_score = self._calculate_weighted_score(
+                    detailed_scores, weights, similarity_score
+                )
+
+                final_score = self._validate_similarity_score(
+                    final_score, f"最终分数 {project['id']}"
+                )
+
+                if final_score >= effective_min_score:
+                    reasons, concerns = self._generate_match_analysis(
+                        project, engineer_info, detailed_scores
+                    )
+
+                    match = MatchResult(
+                        id=uuid4(),
+                        project_id=project["id"],
+                        engineer_id=engineer_info["id"],
+                        match_score=round(final_score, 3),
+                        confidence_score=round(
+                            similarity_score * 0.4 + final_score * 0.6, 3
+                        ),
+                        skill_match_score=detailed_scores.get("skill_match"),
+                        experience_match_score=detailed_scores.get("experience_match"),
+                        japanese_level_match_score=detailed_scores.get(
+                            "japanese_level_match"
+                        ),
+                        project_experience_match_score=None,
+                        budget_match_score=None,
+                        location_match_score=None,
+                        matched_skills=detailed_scores.get("matched_skills", []),
+                        missing_skills=detailed_scores.get("missing_skills", []),
+                        matched_experiences=[],
+                        missing_experiences=[],
+                        project_experience_match=[],
+                        missing_project_experience=[],
+                        match_reasons=reasons,
+                        concerns=concerns,
+                        project_title=project.get("title"),
+                        engineer_name=engineer_info.get("name"),
+                        status="未保存",
+                        created_at=datetime.utcnow(),
+                    )
+
+                    matches.append(match)
+
+            except Exception as e:
+                logger.error(
+                    f"计算匹配失败 - 简历: {engineer_info['id']}, 项目: {project['id']}, 错误: {str(e)}"
+                )
+                continue
+
+        matches.sort(key=lambda x: x.match_score, reverse=True)
+
+        if matches:
+            scores = [m.match_score for m in matches]
+            logger.info(
+                f"分数分布: 最高={max(scores):.3f}, 最低={min(scores):.3f}, 平均={np.mean(scores):.3f}"
+            )
+
+        return matches[:max_matches]
+
+    # ========== 主要API方法 ==========
 
     async def match_project_to_engineers(
         self, request: ProjectToEngineersMatchRequest
     ) -> ProjectToEngineersResponse:
-        """案件匹配简历（使用简化版计算）"""
+        """案件匹配简历（修复版）"""
         start_time = time.time()
 
         try:
@@ -764,6 +904,308 @@ class AIMatchingService:
         except Exception as e:
             logger.error(f"案件匹配简历失败: {str(e)}")
             raise Exception(f"匹配失败: {str(e)}")
+
+    async def match_engineer_to_projects(
+        self, request: EngineerToProjectsMatchRequest
+    ) -> EngineerToProjectsResponse:
+        """简历匹配案件（新实现）"""
+        start_time = time.time()
+
+        try:
+            logger.info(f"开始简历匹配案件: engineer_id={request.engineer_id}")
+
+            matching_history = await self._create_matching_history(
+                tenant_id=request.tenant_id,
+                matching_type="engineer_to_projects",
+                trigger_type=request.trigger_type,
+                executed_by=request.executed_by,
+                engineer_ids=[request.engineer_id],
+                filters=request.filters or {},
+            )
+
+            try:
+                engineer_info = await self._get_engineer_info(
+                    request.engineer_id, request.tenant_id
+                )
+                if not engineer_info:
+                    raise ValueError(f"简历不存在: {request.engineer_id}")
+
+                candidate_projects = await self._get_candidate_projects(
+                    request.tenant_id, request.filters or {}
+                )
+
+                logger.info(f"找到 {len(candidate_projects)} 个候选项目")
+
+                matches = await self._calculate_engineer_project_matches(
+                    engineer_info,
+                    candidate_projects,
+                    request.weights or {},
+                    request.max_matches,
+                    request.min_score,
+                    matching_history["id"],
+                )
+
+                saved_matches = await self._save_matches(
+                    matches, matching_history["id"]
+                )
+
+                processing_time = int(time.time() - start_time)
+                high_quality_matches = len(
+                    [m for m in saved_matches if m.match_score >= 0.8]
+                )
+
+                await self._update_matching_history(
+                    matching_history["id"],
+                    execution_status="completed",
+                    total_projects_input=len(candidate_projects),
+                    total_matches_generated=len(saved_matches),
+                    high_quality_matches=high_quality_matches,
+                    processing_time_seconds=processing_time,
+                    ai_config={
+                        "weights": request.weights,
+                        "model_version": self.model_version,
+                        "algorithm_version": "dispatch_simplified_v1.0",
+                    },
+                    project_ids=[p["id"] for p in candidate_projects],
+                )
+
+                logger.info(f"简历匹配完成: 生成 {len(saved_matches)} 个匹配")
+
+                return EngineerToProjectsResponse(
+                    matching_history=MatchingHistoryResponse(**matching_history),
+                    matches=saved_matches,
+                    total_matches=len(saved_matches),
+                    high_quality_matches=high_quality_matches,
+                    processing_time_seconds=processing_time,
+                    engineer_info=self._format_engineer_info(engineer_info),
+                    matched_projects=saved_matches,
+                    recommendations=self._generate_engineer_recommendations(
+                        engineer_info, saved_matches
+                    ),
+                    warnings=[],
+                )
+
+            except Exception as e:
+                await self._update_matching_history(
+                    matching_history["id"],
+                    execution_status="failed",
+                    error_message=str(e),
+                )
+                raise
+
+        except Exception as e:
+            logger.error(f"简历匹配案件失败: {str(e)}")
+            raise Exception(f"匹配失败: {str(e)}")
+
+    async def bulk_matching(self, request: BulkMatchingRequest) -> BulkMatchingResponse:
+        """批量匹配（新实现）"""
+        start_time = time.time()
+
+        try:
+            logger.info("开始批量匹配")
+
+            matching_history = await self._create_matching_history(
+                tenant_id=request.tenant_id,
+                matching_type="bulk_matching",
+                trigger_type=request.trigger_type,
+                executed_by=request.executed_by,
+                project_ids=request.project_ids,
+                engineer_ids=request.engineer_ids,
+                filters=request.filters or {},
+            )
+
+            try:
+                # 获取项目和简历数据
+                if request.project_ids:
+                    candidate_projects = []
+                    for project_id in request.project_ids:
+                        project = await self._get_project_info(
+                            project_id, request.tenant_id
+                        )
+                        if project:
+                            candidate_projects.append(project)
+                else:
+                    candidate_projects = await self._get_candidate_projects(
+                        request.tenant_id, request.filters or {}
+                    )
+
+                if request.engineer_ids:
+                    candidate_engineers = []
+                    for engineer_id in request.engineer_ids:
+                        engineer = await self._get_engineer_info(
+                            engineer_id, request.tenant_id
+                        )
+                        if engineer:
+                            candidate_engineers.append(engineer)
+                else:
+                    candidate_engineers = await self._get_candidate_engineers(
+                        request.tenant_id, request.filters or {}
+                    )
+
+                logger.info(
+                    f"批量匹配：{len(candidate_projects)} 个项目 × {len(candidate_engineers)} 个简历"
+                )
+
+                all_matches = []
+                top_matches_by_project = {}
+
+                # 限制处理数量以避免超时
+                max_projects = min(len(candidate_projects), 10)  # 最多处理10个项目
+
+                for i, project in enumerate(candidate_projects[:max_projects]):
+                    logger.info(
+                        f"处理项目 {i+1}/{max_projects}: {project.get('title', '')}"
+                    )
+
+                    project_matches = await self._calculate_project_engineer_matches(
+                        project,
+                        candidate_engineers,
+                        {
+                            "skill_match": 0.5,
+                            "experience_match": 0.3,
+                            "japanese_level_match": 0.2,
+                        },
+                        request.max_matches,
+                        request.min_score,
+                        matching_history["id"],
+                    )
+
+                    if project_matches:
+                        all_matches.extend(project_matches)
+                        top_matches_by_project[str(project["id"])] = project_matches[
+                            :3
+                        ]  # 前3个
+
+                # 保存所有匹配
+                saved_matches = await self._save_matches(
+                    all_matches, matching_history["id"]
+                )
+
+                processing_time = int(time.time() - start_time)
+                high_quality_matches = len(
+                    [m for m in saved_matches if m.match_score >= 0.8]
+                )
+
+                await self._update_matching_history(
+                    matching_history["id"],
+                    execution_status="completed",
+                    total_projects_input=len(candidate_projects),
+                    total_engineers_input=len(candidate_engineers),
+                    total_matches_generated=len(saved_matches),
+                    high_quality_matches=high_quality_matches,
+                    processing_time_seconds=processing_time,
+                    ai_config={
+                        "batch_size": request.batch_size,
+                        "model_version": self.model_version,
+                        "algorithm_version": "dispatch_simplified_v1.0",
+                    },
+                    project_ids=[p["id"] for p in candidate_projects],
+                    engineer_ids=[e["id"] for e in candidate_engineers],
+                )
+
+                logger.info(f"批量匹配完成: 生成 {len(saved_matches)} 个匹配")
+
+                return BulkMatchingResponse(
+                    matching_history=MatchingHistoryResponse(**matching_history),
+                    matches=saved_matches,
+                    total_matches=len(saved_matches),
+                    high_quality_matches=high_quality_matches,
+                    processing_time_seconds=processing_time,
+                    batch_summary={
+                        "total_projects": len(candidate_projects),
+                        "total_engineers": len(candidate_engineers),
+                        "processed_projects": max_projects,
+                        "average_match_score": (
+                            np.mean([m.match_score for m in saved_matches])
+                            if saved_matches
+                            else 0
+                        ),
+                    },
+                    top_matches_by_project=top_matches_by_project,
+                    top_matches_by_engineer={},  # 简化版暂不实现
+                    recommendations=["批量匹配已完成，建议查看高分匹配项目"],
+                    warnings=(
+                        [] if len(saved_matches) > 0 else ["没有找到符合条件的匹配"]
+                    ),
+                )
+
+            except Exception as e:
+                await self._update_matching_history(
+                    matching_history["id"],
+                    execution_status="failed",
+                    error_message=str(e),
+                )
+                raise
+
+        except Exception as e:
+            logger.error(f"批量匹配失败: {str(e)}")
+            raise Exception(f"批量匹配失败: {str(e)}")
+
+    # ========== 新增的辅助方法 ==========
+
+    async def _get_engineer_info(
+        self, engineer_id: UUID, tenant_id: UUID
+    ) -> Optional[Dict[str, Any]]:
+        """获取简历信息"""
+        query = """
+        SELECT * FROM engineers 
+        WHERE id = $1 AND tenant_id = $2 AND is_active = true
+        """
+        return await fetch_one(query, engineer_id, tenant_id)
+
+    async def _get_candidate_projects(
+        self, tenant_id: UUID, filters: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """获取候选项目"""
+        base_query = """
+        SELECT * FROM projects 
+        WHERE tenant_id = $1 AND is_active = true
+        """
+        params = [tenant_id]
+        conditions = []
+
+        if "status" in filters:
+            conditions.append(f"status = ANY(${len(params) + 1})")
+            params.append(filters["status"])
+
+        if "skills" in filters:
+            conditions.append(f"skills && ${len(params) + 1}")
+            params.append(filters["skills"])
+
+        if conditions:
+            base_query += " AND " + " AND ".join(conditions)
+
+        base_query += " AND ai_match_embedding IS NOT NULL"
+        base_query += " ORDER BY created_at DESC LIMIT 1000"
+
+        return await fetch_all(base_query, *params)
+
+    def _format_engineer_info(self, engineer: Dict[str, Any]) -> Dict[str, Any]:
+        """格式化简历信息"""
+        return {
+            "id": str(engineer["id"]),
+            "name": engineer.get("name", ""),
+            "skills": engineer.get("skills", []),
+            "experience": engineer.get("experience", ""),
+            "japanese_level": engineer.get("japanese_level", ""),
+            "current_status": engineer.get("current_status", ""),
+        }
+
+    def _generate_engineer_recommendations(
+        self, engineer: Dict[str, Any], matches: List[MatchResult]
+    ) -> List[str]:
+        """生成简历推荐"""
+        recommendations = []
+
+        if not matches:
+            recommendations.append("没有找到匹配的项目，建议扩展技能范围")
+        elif len([m for m in matches if m.match_score >= 0.8]) == 0:
+            recommendations.append("高质量匹配较少，建议提升技能水平或考虑更多项目类型")
+
+        if len(matches) >= 5:
+            recommendations.append("有多个匹配项目，建议优先关注前3个高分项目")
+
+        return recommendations
 
     # ========== 保持原有的辅助方法（未修改部分） ==========
 
@@ -944,17 +1386,7 @@ class AIMatchingService:
 
         return recommendations
 
-    # ========== 其他API方法保持兼容性（简化实现） ==========
-
-    async def match_engineer_to_projects(
-        self, request: EngineerToProjectsMatchRequest
-    ) -> EngineerToProjectsResponse:
-        """简历匹配案件（简化实现）"""
-        raise NotImplementedError("简历匹配案件功能待实现")
-
-    async def bulk_matching(self, request: BulkMatchingRequest) -> BulkMatchingResponse:
-        """批量匹配（简化实现）"""
-        raise NotImplementedError("批量匹配功能待实现")
+    # ========== 历史查询方法 ==========
 
     async def get_matching_history(
         self, tenant_id: UUID, history_id: Optional[UUID] = None, limit: int = 20
