@@ -1,4 +1,4 @@
-# app/services/ai_matching_service.py - 修复版（保持向后兼容）
+# app/services/ai_matching_service.py
 import asyncio
 import json
 import time
@@ -7,6 +7,7 @@ from typing import List, Optional, Dict, Any, Tuple, Union
 from uuid import UUID, uuid4
 import logging
 import numpy as np
+import re
 from sentence_transformers import SentenceTransformer
 
 from ..database import (
@@ -33,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 
 class AIMatchingService:
-    """AI匹配服务 - 修复版（解决相似度计算问题）"""
+    """AI匹配服务 - 派遣专用简化版（仅技能+经验+日语）"""
 
     def __init__(self):
         self.model = None
@@ -109,7 +110,6 @@ class AIMatchingService:
                 return np.array([])
 
             if isinstance(vector_str, str):
-                # 移除外层方括号并分割
                 vector_str = vector_str.strip()
                 if vector_str.startswith("[") and vector_str.endswith("]"):
                     vector_str = vector_str[1:-1]
@@ -138,17 +138,269 @@ class AIMatchingService:
 
         if not (0 <= score <= 1):
             logger.warning(f"相似度分数超出范围 {context}: {score}, 进行修正")
-            # 尝试修正异常值
             if score > 10:
-                score = 1.0  # 可能是内积值，设为最高相似度
+                score = 1.0
             elif score < -10:
-                score = 0.0  # 可能是负距离值，设为最低相似度
+                score = 0.0
             elif score > 1:
-                score = 1.0  # 限制上界
+                score = 1.0
             elif score < 0:
-                score = 0.0  # 限制下界
+                score = 0.0
 
         return float(score)
+
+    # ========== 新增：年限提取方法 ==========
+
+    def _extract_experience_years(self, experience_text: str) -> int:
+        """
+        从经验描述中提取年限数字
+
+        支持格式：
+        - "3年以上" → 3
+        - "5年間のフロントエンド開発" → 5
+        - "React開発2年以上" → 2
+        - "10年近くの経験" → 10
+        """
+        if not experience_text:
+            return 0
+
+        # 日语年限提取正则模式
+        patterns = [
+            r"(\d+)年以上",  # 最常见：3年以上
+            r"(\d+)年間",  # 期间表达：5年間
+            r"(\d+)年の",  # 所有格：3年の経験
+            r"(\d+)年近く",  # 接近：5年近く
+            r"(\d+)年程度",  # 程度：3年程度
+            r"(\d+)年目",  # 第几年：5年目
+            r"(\d+)年ほど",  # 大约：3年ほど
+            r"(\d+)年経験",  # 直接：5年経験
+            r"(\d+)年",  # 兜底模式
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, experience_text)
+            if match:
+                years = int(match.group(1))
+                logger.debug(f"提取年限: '{experience_text}' → {years}年")
+                return years
+
+        logger.debug(f"未能提取年限: '{experience_text}'")
+        return 0
+
+    def _calculate_experience_match(
+        self, project_years: int, engineer_years: int
+    ) -> float:
+        """
+        计算经验年限匹配分数
+
+        派遣年限匹配规则：
+        1. 满足要求：100%匹配
+        2. 超出要求但合理：95%匹配
+        3. 过度超出：适当扣分（over-qualified）
+        4. 不足要求：按比例扣分
+        """
+        if project_years <= 0:
+            # 没有明确年限要求
+            return 0.8 if engineer_years > 0 else 0.6
+
+        if engineer_years >= project_years:
+            # 满足或超过要求
+            if engineer_years <= project_years * 1.5:
+                return 1.0  # 合理范围内
+            elif engineer_years <= project_years * 2:
+                return 0.95  # 轻微over-qualified
+            else:
+                return 0.85  # 明显over-qualified但仍可用
+        else:
+            # 不满足要求
+            if engineer_years == 0:
+                return 0.3  # 没有经验
+            else:
+                # 按比例计算，但设最低分
+                ratio = engineer_years / project_years
+                return max(0.4, ratio)
+
+    # ========== 核心修改：简化版详细匹配分数计算 ==========
+
+    def _calculate_detailed_match_scores(
+        self, project: Dict[str, Any], engineer: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        🔥 派遣专用简化版详细匹配分数计算
+
+        仅关注三个核心维度：
+        1. 技能匹配 (skill_match)
+        2. 经验年限匹配 (experience_match)
+        3. 日语水平匹配 (japanese_level_match)
+
+        移除所有复杂的关键词权重系统
+        """
+        scores = {}
+
+        # ==================== 1. 技能匹配（派遣最重要） ====================
+        project_skills = set(project.get("skills", []))
+        engineer_skills = set(engineer.get("skills", []))
+
+        if project_skills:
+            matched_skills = project_skills.intersection(engineer_skills)
+            skill_score = len(matched_skills) / len(project_skills)
+
+            scores["matched_skills"] = list(matched_skills)
+            scores["missing_skills"] = list(project_skills - engineer_skills)
+            scores["skill_match"] = skill_score
+        else:
+            scores["matched_skills"] = []
+            scores["missing_skills"] = []
+            scores["skill_match"] = 0.5  # 没有技能要求时给中性分数
+
+        # ==================== 2. 经验年限匹配（简化为纯年限比较） ====================
+        project_years = self._extract_experience_years(project.get("experience", ""))
+        engineer_years = self._extract_experience_years(engineer.get("experience", ""))
+
+        experience_score = self._calculate_experience_match(
+            project_years, engineer_years
+        )
+
+        scores["experience_match"] = experience_score
+        scores["project_required_years"] = project_years
+        scores["engineer_experience_years"] = engineer_years
+
+        # ==================== 3. 日语水平匹配（保持原逻辑） ====================
+        project_jp = project.get("japanese_level", "")
+        engineer_jp = engineer.get("japanese_level", "")
+
+        # 日语等级数值化映射
+        jp_levels = {
+            "N5": 1,
+            "N4": 2,
+            "N3": 3,
+            "N2": 4,
+            "N1": 5,
+            "ネイティブ": 6,
+            "native": 6,
+            "母语": 6,
+            "ビジネスレベル": 5.5,
+            "ビジネス": 5.5,
+            "": 0,
+        }
+
+        project_jp_score = jp_levels.get(project_jp, 0)
+        engineer_jp_score = jp_levels.get(engineer_jp, 0)
+
+        if project_jp_score > 0:
+            if engineer_jp_score >= project_jp_score:
+                scores["japanese_level_match"] = 1.0
+            elif engineer_jp_score > 0:
+                scores["japanese_level_match"] = engineer_jp_score / project_jp_score
+            else:
+                scores["japanese_level_match"] = 0.2
+        else:
+            scores["japanese_level_match"] = 0.9 if engineer_jp_score > 0 else 0.7
+
+        # 确保所有分数在[0,1]范围内
+        for key in ["skill_match", "experience_match", "japanese_level_match"]:
+            if key in scores:
+                scores[key] = max(0, min(1, scores[key]))
+
+        return scores
+
+    # ========== 修改：简化版权重计算 ==========
+
+    def _calculate_weighted_score(
+        self,
+        detailed_scores: Dict[str, Any],
+        weights: Dict[str, float],
+        similarity_score: float,
+    ) -> float:
+        """
+        🔥 派遣专用简化版权重计算
+        """
+        # 验证相似度分数
+        similarity_score = self._validate_similarity_score(
+            similarity_score, "语义相似度"
+        )
+
+        # 🔥 派遣专用默认权重（只有三个维度）
+        dispatch_default_weights = {
+            "skill_match": 0.5,  # 技能匹配 50%
+            "experience_match": 0.3,  # 经验年限 30%
+            "japanese_level_match": 0.2,  # 日语水平 20%
+        }
+
+        # 合并权重配置
+        final_weights = {**dispatch_default_weights, **weights}
+
+        # 计算结构化匹配分数
+        weighted_sum = 0
+        total_weight = 0
+
+        for score_type, weight in final_weights.items():
+            if (
+                score_type in detailed_scores
+                and detailed_scores[score_type] is not None
+            ):
+                score = max(0, min(1, float(detailed_scores[score_type])))
+                weighted_sum += score * weight
+                total_weight += weight
+
+        base_score = weighted_sum / total_weight if total_weight > 0 else 0
+        base_score = max(0, min(1, base_score))
+
+        # 🔥 派遣重视明确匹配，降低AI语义相似度权重
+        # 结构化匹配 80% + 语义相似度 20%
+        final_score = base_score * 0.8 + similarity_score * 0.2
+
+        return max(0, min(1, final_score))
+
+    # ========== 简化版匹配分析生成 ==========
+
+    def _generate_match_analysis(
+        self, project: Dict[str, Any], engineer: Dict[str, Any], scores: Dict[str, Any]
+    ) -> Tuple[List[str], List[str]]:
+        """
+        🔥 简化版匹配分析生成
+        """
+        reasons = []
+        concerns = []
+
+        # 技能分析
+        skill_score = scores.get("skill_match", 0)
+        if skill_score >= 0.8:
+            matched_skills = scores.get("matched_skills", [])
+            if matched_skills:
+                reasons.append(f"技能高度匹配: {', '.join(matched_skills)}")
+            else:
+                reasons.append("技能匹配度高")
+        elif skill_score < 0.5:
+            concerns.append("技能匹配度较低")
+            missing_skills = scores.get("missing_skills", [])
+            if missing_skills:
+                concerns.append(f"缺少技能: {', '.join(missing_skills)}")
+
+        # 经验年限分析
+        exp_score = scores.get("experience_match", 0)
+        project_years = scores.get("project_required_years", 0)
+        engineer_years = scores.get("engineer_experience_years", 0)
+
+        if exp_score >= 0.9 and project_years > 0:
+            reasons.append(f"经验满足要求 ({engineer_years}年 >= {project_years}年)")
+        elif exp_score < 0.5 and project_years > 0:
+            concerns.append(f"经验不足 ({engineer_years}年 < {project_years}年)")
+        elif engineer_years > project_years * 2 and project_years > 0:
+            concerns.append(
+                f"可能over-qualified ({engineer_years}年 >> {project_years}年)"
+            )
+
+        # 日语水平分析
+        jp_score = scores.get("japanese_level_match", 0)
+        if jp_score >= 0.9:
+            reasons.append("日语水平满足要求")
+        elif jp_score < 0.5:
+            concerns.append("日语水平可能不足")
+
+        return reasons, concerns
+
+    # ========== 保持原有的相似度计算方法 ==========
 
     async def _calculate_similarities_batch(
         self,
@@ -163,7 +415,6 @@ class AIMatchingService:
         candidate_ids = [c["id"] for c in candidates]
         table_name = "engineers" if table_type == "engineers" else "projects"
 
-        # 修复：使用正确的pgvector操作符
         query = f"""
         SELECT id, 
                ai_match_embedding <=> $1 as cosine_distance
@@ -184,24 +435,18 @@ class AIMatchingService:
         similarity_dict = {}
 
         for s in similarities:
-            # 修复：使用余弦距离计算相似度
             cosine_distance = s["cosine_distance"]
 
-            # 验证距离值的合理性
             if cosine_distance is None or not isinstance(cosine_distance, (int, float)):
                 logger.warning(f"无效的余弦距离值: {cosine_distance}")
                 continue
 
-            # 余弦距离通常在[0, 2]范围内，转换为相似度[0, 1]
             cosine_distance = max(0, min(2, float(cosine_distance)))
             similarity_score = 1 - cosine_distance
-
-            # 确保相似度在[0, 1]范围内
             similarity_score = max(0, min(1, similarity_score))
 
             similarity_dict[s["id"]] = similarity_score
 
-        # 组合结果
         for candidate in candidates:
             if candidate["id"] in similarity_dict:
                 similarity_score = similarity_dict[candidate["id"]]
@@ -242,11 +487,9 @@ class AIMatchingService:
                 if candidate_norm == 0:
                     continue
 
-                # 计算余弦相似度
                 dot_product = np.dot(target_vector, candidate_vector)
                 cosine_similarity = dot_product / (target_norm * candidate_norm)
 
-                # 确保在[0, 1]范围内（假设原始值在[-1, 1]）
                 cosine_similarity = (cosine_similarity + 1) / 2
                 cosine_similarity = max(0, min(1, cosine_similarity))
 
@@ -256,197 +499,15 @@ class AIMatchingService:
                 logger.error(f"手动计算相似度失败: {candidate['id']}, 错误: {str(e)}")
                 continue
 
-        # 按相似度排序
         results.sort(key=lambda x: x[1], reverse=True)
         return results
 
-    def _calculate_weighted_score(
-        self,
-        detailed_scores: Dict[str, Any],
-        weights: Dict[str, float],
-        similarity_score: float,
-    ) -> float:
-        """修复版：计算加权综合分数"""
-
-        # 验证并修正相似度分数
-        similarity_score = self._validate_similarity_score(
-            similarity_score, "语义相似度"
-        )
-
-        # 默认权重
-        default_weights = {
-            "skill_match": 0.5,
-            "experience_match": 0.3,
-            "japanese_level_match": 0.2,
-        }
-
-        # 合并权重
-        final_weights = {**default_weights, **weights}
-
-        # 计算结构化匹配分数
-        weighted_sum = 0
-        total_weight = 0
-
-        for score_type, weight in final_weights.items():
-            if (
-                score_type in detailed_scores
-                and detailed_scores[score_type] is not None
-            ):
-                score = detailed_scores[score_type]
-                # 验证每个分数
-                score = max(0, min(1, float(score)))
-                weighted_sum += score * weight
-                total_weight += weight
-
-        # 基础分数
-        base_score = weighted_sum / total_weight if total_weight > 0 else 0
-        base_score = max(0, min(1, base_score))
-
-        # 修复：使用更合理的权重分配
-        # 语义相似度权重30%，结构化匹配权重70%
-        final_score = base_score * 0.7 + similarity_score * 0.3
-
-        # 确保最终分数在合理范围内
-        final_score = max(0, min(1, final_score))
-
-        return final_score
-
-    def _calculate_detailed_match_scores(
-        self, project: Dict[str, Any], engineer: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """计算详细匹配分数"""
-        scores = {}
-
-        # 技能匹配
-        project_skills = set(project.get("skills", []))
-        engineer_skills = set(engineer.get("skills", []))
-
-        if project_skills:
-            matched_skills = project_skills.intersection(engineer_skills)
-            scores["matched_skills"] = list(matched_skills)
-            scores["missing_skills"] = list(project_skills - engineer_skills)
-            scores["skill_match"] = len(matched_skills) / len(project_skills)
-        else:
-            scores["matched_skills"] = []
-            scores["missing_skills"] = []
-            scores["skill_match"] = 0.5
-
-        # 经验匹配
-        project_exp = project.get("experience", "").lower()
-        engineer_exp = engineer.get("experience", "").lower()
-
-        exp_keywords = {
-            "年": 0.1,
-            "経験": 0.2,
-            "開発": 0.2,
-            "設計": 0.15,
-            "運用": 0.1,
-            "保守": 0.1,
-            "管理": 0.1,
-            "リーダー": 0.05,
-        }
-
-        matched_exp = []
-        total_exp_weight = 0
-        matched_exp_weight = 0
-
-        for keyword, weight in exp_keywords.items():
-            if keyword in project_exp:
-                total_exp_weight += weight
-                if keyword in engineer_exp:
-                    matched_exp.append(keyword)
-                    matched_exp_weight += weight
-
-        scores["matched_experiences"] = matched_exp
-        scores["missing_experiences"] = [
-            kw
-            for kw in exp_keywords.keys()
-            if kw in project_exp and kw not in engineer_exp
-        ]
-
-        if total_exp_weight > 0:
-            scores["experience_match"] = matched_exp_weight / total_exp_weight
-        else:
-            scores["experience_match"] = 0.7
-
-        # 日语水平匹配
-        project_jp = project.get("japanese_level", "")
-        engineer_jp = engineer.get("japanese_level", "")
-
-        jp_levels = {
-            "N1": 5,
-            "N2": 4,
-            "N3": 3,
-            "N4": 2,
-            "N5": 1,
-            "ネイティブ": 6,
-            "native": 6,
-            "母语": 6,
-            "": 0,
-        }
-
-        project_jp_score = jp_levels.get(project_jp, 0)
-        engineer_jp_score = jp_levels.get(engineer_jp, 0)
-
-        if project_jp_score > 0:
-            if engineer_jp_score >= project_jp_score:
-                scores["japanese_level_match"] = 1.0
-            elif engineer_jp_score > 0:
-                scores["japanese_level_match"] = engineer_jp_score / project_jp_score
-            else:
-                scores["japanese_level_match"] = 0.2
-        else:
-            scores["japanese_level_match"] = 0.9 if engineer_jp_score > 0 else 0.7
-
-        # 确保所有分数在[0,1]范围内
-        for key in ["skill_match", "experience_match", "japanese_level_match"]:
-            if key in scores:
-                scores[key] = max(0, min(1, scores[key]))
-
-        return scores
-
-    def _generate_match_analysis(
-        self, project: Dict[str, Any], engineer: Dict[str, Any], scores: Dict[str, Any]
-    ) -> Tuple[List[str], List[str]]:
-        """生成匹配分析"""
-        reasons = []
-        concerns = []
-
-        # 技能匹配分析
-        skill_score = scores.get("skill_match", 0)
-        if skill_score >= 0.8:
-            reasons.append(
-                f"技能高度匹配: {', '.join(scores.get('matched_skills', []))}"
-            )
-        elif skill_score >= 0.5:
-            reasons.append("技能部分匹配")
-            if scores.get("missing_skills"):
-                concerns.append(
-                    f"缺少技能: {', '.join(scores.get('missing_skills', []))}"
-                )
-        else:
-            concerns.append("技能匹配度较低")
-
-        # 日语水平分析
-        jp_score = scores.get("japanese_level_match", 0)
-        if jp_score >= 0.9:
-            reasons.append("日语水平满足要求")
-        elif jp_score < 0.5:
-            concerns.append("日语水平可能不足")
-
-        # 经验分析
-        exp_score = scores.get("experience_match", 0)
-        if exp_score >= 0.7:
-            reasons.append("相关经验丰富")
-        elif exp_score < 0.3:
-            concerns.append("相关经验不足")
-
-        return reasons, concerns
+    # ========== 保存匹配结果方法 ==========
 
     async def _save_matches(
         self, matches: List[MatchResult], matching_history_id: UUID
     ) -> List[MatchResult]:
-        """修复版：保存匹配结果（处理重复记录）"""
+        """保存匹配结果"""
         if not matches:
             return []
 
@@ -455,12 +516,10 @@ class AIMatchingService:
         async with get_db_connection() as conn:
             for match in matches:
                 try:
-                    # 获取tenant_id
                     tenant_id = await fetch_val(
                         "SELECT tenant_id FROM projects WHERE id = $1", match.project_id
                     )
 
-                    # 修复：使用UPSERT处理重复记录
                     await conn.execute(
                         """
                         INSERT INTO project_engineer_matches (
@@ -497,8 +556,8 @@ class AIMatchingService:
                         match.japanese_level_match_score,
                         match.matched_skills,
                         match.missing_skills,
-                        match.matched_experiences,
-                        match.missing_experiences,
+                        match.matched_experiences or [],  # 简化版可能为空
+                        match.missing_experiences or [],  # 简化版可能为空
                         match.match_reasons,
                         match.concerns,
                         match.status,
@@ -513,6 +572,8 @@ class AIMatchingService:
         logger.info(f"成功保存 {len(saved_matches)}/{len(matches)} 个匹配记录")
         return saved_matches
 
+    # ========== 核心匹配计算方法 ==========
+
     async def _calculate_project_engineer_matches(
         self,
         project_info: Dict[str, Any],
@@ -522,14 +583,15 @@ class AIMatchingService:
         min_score: float,
         matching_history_id: UUID,
     ) -> List[MatchResult]:
-        """修复版：计算案件-简历匹配"""
+        """
+        🔥 派遣专用案件-简历匹配计算
+        """
         matches = []
 
         if not project_info.get("ai_match_embedding"):
             logger.warning(f"案件 {project_info['id']} 没有embedding数据")
             return matches
 
-        # 使用修复版的相似度计算
         engineer_similarities = await self._calculate_similarities_batch(
             project_info["ai_match_embedding"],
             [e for e in engineers if e.get("ai_match_embedding")],
@@ -540,28 +602,23 @@ class AIMatchingService:
 
         for engineer, similarity_score in engineer_similarities:
             try:
-                # 验证相似度分数
                 similarity_score = self._validate_similarity_score(
                     similarity_score, f"工程师 {engineer['id']}"
                 )
 
-                # 计算详细匹配分数
                 detailed_scores = self._calculate_detailed_match_scores(
                     project_info, engineer
                 )
 
-                # 使用修复版的权重分数计算
                 final_score = self._calculate_weighted_score(
                     detailed_scores, weights, similarity_score
                 )
 
-                # 验证最终分数
                 final_score = self._validate_similarity_score(
                     final_score, f"最终分数 {engineer['id']}"
                 )
 
                 if final_score >= min_score:
-                    # 生成匹配分析
                     reasons, concerns = self._generate_match_analysis(
                         project_info, engineer, detailed_scores
                     )
@@ -572,26 +629,22 @@ class AIMatchingService:
                         engineer_id=engineer["id"],
                         match_score=round(final_score, 3),
                         confidence_score=round(
-                            similarity_score * 0.6 + final_score * 0.4, 3
+                            similarity_score * 0.4 + final_score * 0.6, 3
                         ),
                         skill_match_score=detailed_scores.get("skill_match"),
                         experience_match_score=detailed_scores.get("experience_match"),
                         japanese_level_match_score=detailed_scores.get(
                             "japanese_level_match"
                         ),
-                        project_experience_match_score=None,
-                        budget_match_score=None,
-                        location_match_score=None,
+                        project_experience_match_score=None,  # 简化版不需要
+                        budget_match_score=None,  # 简化版不需要
+                        location_match_score=None,  # 简化版不需要
                         matched_skills=detailed_scores.get("matched_skills", []),
                         missing_skills=detailed_scores.get("missing_skills", []),
-                        matched_experiences=detailed_scores.get(
-                            "matched_experiences", []
-                        ),
-                        missing_experiences=detailed_scores.get(
-                            "missing_experiences", []
-                        ),
-                        project_experience_match=[],
-                        missing_project_experience=[],
+                        matched_experiences=[],  # 简化版不需要复杂经验匹配
+                        missing_experiences=[],  # 简化版不需要复杂经验匹配
+                        project_experience_match=[],  # 简化版不需要
+                        missing_project_experience=[],  # 简化版不需要
                         match_reasons=reasons,
                         concerns=concerns,
                         project_title=project_info.get("title"),
@@ -608,10 +661,8 @@ class AIMatchingService:
                 )
                 continue
 
-        # 按分数排序
         matches.sort(key=lambda x: x.match_score, reverse=True)
 
-        # 记录分数分布
         if matches:
             scores = [m.match_score for m in matches]
             logger.info(
@@ -620,18 +671,17 @@ class AIMatchingService:
 
         return matches[:max_matches]
 
-    # ========== 主要API方法 ==========
+    # ========== 保持原有的主要API方法 ==========
 
     async def match_project_to_engineers(
         self, request: ProjectToEngineersMatchRequest
     ) -> ProjectToEngineersResponse:
-        """案件匹配简历（使用修复版计算）"""
+        """案件匹配简历（使用简化版计算）"""
         start_time = time.time()
 
         try:
             logger.info(f"开始案件匹配简历: project_id={request.project_id}")
 
-            # 创建匹配历史记录
             matching_history = await self._create_matching_history(
                 tenant_id=request.tenant_id,
                 matching_type="project_to_engineers",
@@ -642,21 +692,18 @@ class AIMatchingService:
             )
 
             try:
-                # 获取案件信息
                 project_info = await self._get_project_info(
                     request.project_id, request.tenant_id
                 )
                 if not project_info:
                     raise ValueError(f"案件不存在: {request.project_id}")
 
-                # 获取候选简历
                 candidate_engineers = await self._get_candidate_engineers(
                     request.tenant_id, request.filters or {}
                 )
 
                 logger.info(f"找到 {len(candidate_engineers)} 个候选简历")
 
-                # 执行匹配
                 matches = await self._calculate_project_engineer_matches(
                     project_info,
                     candidate_engineers,
@@ -666,12 +713,10 @@ class AIMatchingService:
                     matching_history["id"],
                 )
 
-                # 保存匹配结果
                 saved_matches = await self._save_matches(
                     matches, matching_history["id"]
                 )
 
-                # 更新匹配历史
                 processing_time = int(time.time() - start_time)
                 high_quality_matches = len(
                     [m for m in saved_matches if m.match_score >= 0.8]
@@ -687,6 +732,7 @@ class AIMatchingService:
                     ai_config={
                         "weights": request.weights,
                         "model_version": self.model_version,
+                        "algorithm_version": "dispatch_simplified_v1.0",  # 标记简化版
                     },
                     engineer_ids=[e["id"] for e in candidate_engineers],
                 )
@@ -708,7 +754,6 @@ class AIMatchingService:
                 )
 
             except Exception as e:
-                # 更新失败状态
                 await self._update_matching_history(
                     matching_history["id"],
                     execution_status="failed",
@@ -720,7 +765,7 @@ class AIMatchingService:
             logger.error(f"案件匹配简历失败: {str(e)}")
             raise Exception(f"匹配失败: {str(e)}")
 
-    # ========== 辅助方法 ==========
+    # ========== 保持原有的辅助方法（未修改部分） ==========
 
     async def _create_matching_history(
         self,
@@ -761,7 +806,6 @@ class AIMatchingService:
                 statistics_json,
             )
 
-            # 获取创建的记录并格式化
             history_data = await conn.fetchrow(
                 "SELECT * FROM ai_matching_history WHERE id = $1", history_id
             )
@@ -852,7 +896,6 @@ class AIMatchingService:
         params = [tenant_id]
         conditions = []
 
-        # 应用筛选条件
         if "japanese_level" in filters:
             conditions.append(f"japanese_level = ANY(${len(params) + 1})")
             params.append(filters["japanese_level"])
@@ -868,7 +911,6 @@ class AIMatchingService:
         if conditions:
             base_query += " AND " + " AND ".join(conditions)
 
-        # 只获取有embedding的记录
         base_query += " AND ai_match_embedding IS NOT NULL"
         base_query += " ORDER BY created_at DESC LIMIT 1000"
 
@@ -895,26 +937,23 @@ class AIMatchingService:
         if not matches:
             recommendations.append("没有找到匹配的简历，建议调整需求条件")
         elif len([m for m in matches if m.match_score >= 0.8]) == 0:
-            recommendations.append("高质量匹配较少，建议放宽技能要求")
+            recommendations.append("高质量匹配较少，建议放宽技能要求或降低年限要求")
 
         if len(matches) >= 5:
             recommendations.append("建议优先联系前3名高分候选人")
 
         return recommendations
 
-    # ========== 其他API方法（保持兼容性） ==========
+    # ========== 其他API方法保持兼容性（简化实现） ==========
 
     async def match_engineer_to_projects(
         self, request: EngineerToProjectsMatchRequest
     ) -> EngineerToProjectsResponse:
         """简历匹配案件（简化实现）"""
-        # 这里可以实现简历匹配案件的逻辑
-        # 为了保持兼容性，先返回一个基本的响应
         raise NotImplementedError("简历匹配案件功能待实现")
 
     async def bulk_matching(self, request: BulkMatchingRequest) -> BulkMatchingResponse:
         """批量匹配（简化实现）"""
-        # 这里可以实现批量匹配的逻辑
         raise NotImplementedError("批量匹配功能待实现")
 
     async def get_matching_history(
