@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# scripts/create_test_data.py
+# scripts/create_test_data.py - 修复版
 """
 创建AI匹配测试数据
 
@@ -32,7 +32,7 @@ TEST_PROJECTS = [
     {
         "title": "React.js Webアプリケーション開発",
         "client_company": "株式会社テックイノベーション",
-        "company_type": "自社",
+        "company_type": "他社",
         "description": "新しいECサイトのフロントエンド開発",
         "detail_description": "React.js、TypeScript、Next.jsを使用したモダンなWebアプリケーション開発。レスポンシブデザイン対応、API連携、状態管理(Redux)の実装が必要です。",
         "status": "募集中",
@@ -59,7 +59,7 @@ TEST_PROJECTS = [
     {
         "title": "Python Django バックエンド開発",
         "client_company": "株式会社データサイエンス",
-        "company_type": "自社",
+        "company_type": "他社",
         "description": "AIサービスのバックエンドAPI開発",
         "detail_description": "Django REST frameworkを使用したAPIサーバー開発。機械学習モデルとの連携、大量データ処理、高性能なAPI設計が求められます。PostgreSQL、Redis使用。",
         "status": "募集中",
@@ -86,7 +86,7 @@ TEST_PROJECTS = [
     {
         "title": "Java Spring Boot マイクロサービス開発",
         "client_company": "大手金融機関",
-        "company_type": "元請け",
+        "company_type": "他社",
         "description": "銀行システムのマイクロサービス基盤開発",
         "detail_description": "Java Spring Bootを使用したマイクロサービスアーキテクチャの設計・開発。Kubernetes、Docker、AWS環境での開発。高いセキュリティ要件があります。",
         "status": "募集中",
@@ -113,7 +113,7 @@ TEST_PROJECTS = [
     {
         "title": "React Native モバイルアプリ開発",
         "client_company": "スタートアップ企業",
-        "company_type": "自社",
+        "company_type": "他社",
         "description": "ヘルスケアアプリのモバイル開発",
         "detail_description": "React Nativeを使用したiOS/Androidアプリ開発。Firebaseとの連携、プッシュ通知、位置情報機能の実装。UIXにもこだわりたいプロジェクトです。",
         "status": "募集中",
@@ -132,7 +132,7 @@ TEST_PROJECTS = [
     {
         "title": "Vue.js + Node.js フルスタック開発",
         "client_company": "中小IT企業",
-        "company_type": "自社",
+        "company_type": "他社",
         "description": "社内管理システムのリニューアル",
         "detail_description": "Vue.js + Node.js (Express)でのフルスタック開発。既存システムからの移行、データベース設計、API設計から実装まで担当。",
         "status": "募集中",
@@ -157,7 +157,7 @@ TEST_PROJECTS = [
     },
 ]
 
-# 测试简历数据
+# 测试简历数据 - 修复版（使用正确的状态值）
 TEST_ENGINEERS = [
     {
         "name": "田中太郎",
@@ -176,10 +176,10 @@ TEST_ENGINEERS = [
         ],
         "experience": "フロントエンド開発5年",
         "work_experience": "React.jsを使用したWebアプリケーション開発5年。大手ECサイトのフロントエンド開発に3年従事。TypeScriptでの開発経験2年。",
-        "japanese_level": "N1",
+        "japanese_level": "日常会話レベル",
         "english_level": "日常会話レベル",
-        "current_status": "available",
-        "company_type": "フリーランス",
+        "current_status": "提案中",  # 修復：使用正确的状态值
+        "company_type": "他社",
         "preferred_locations": ["東京都", "神奈川県"],
         "desired_rate_min": 55,
         "desired_rate_max": 75,
@@ -209,10 +209,10 @@ TEST_ENGINEERS = [
         ],
         "experience": "バックエンド開発7年、機械学習2年",
         "work_experience": "PythonでのWebアプリケーション開発7年。Django REST frameworkでのAPI開発が得意。機械学習プロジェクトでのバックエンド開発経験2年。AWSでのインフラ構築も可能。",
-        "japanese_level": "N1",
-        "english_level": "ビジネスレベル",
-        "current_status": "available",
-        "company_type": "正社員",
+        "japanese_level": "日常会話レベル",
+        "english_level": "日常会話レベル",
+        "current_status": "提案中",  # 修复：使用数据库中存在的状态值
+        "company_type": "他社",
         "company_name": "株式会社AI開発",
         "preferred_locations": ["東京都", "リモート"],
         "desired_rate_min": 70,
@@ -243,10 +243,10 @@ TEST_ENGINEERS = [
         ],
         "experience": "Java開発6年、マイクロサービス3年",
         "work_experience": "Java Spring Bootでの企業システム開発6年。マイクロサービスアーキテクチャでの開発経験3年。金融系システム開発経験2年。AWSでのクラウド開発に精通。",
-        "japanese_level": "N1",
-        "english_level": "ネイティブレベル",
-        "current_status": "available",
-        "company_type": "フリーランス",
+        "japanese_level": "日常会話レベル",
+        "english_level": "日常会話レベル",
+        "current_status": "提案中",  # 修复：使用正确的状态值
+        "company_type": "他社",
         "preferred_locations": ["東京都", "大阪府"],
         "desired_rate_min": 75,
         "desired_rate_max": 95,
@@ -276,10 +276,10 @@ TEST_ENGINEERS = [
         ],
         "experience": "モバイルアプリ開発4年",
         "work_experience": "React Nativeでのクロスプラットフォーム開発4年。iOS/Androidアプリを複数リリース。ヘルスケア、フィンテック分野でのアプリ開発経験。UI/UXデザインにも対応可能。",
-        "japanese_level": "N1",
+        "japanese_level": "日常会話レベル",
         "english_level": "日常会話レベル",
-        "current_status": "available",
-        "company_type": "フリーランス",
+        "current_status": "提案中",  # 修复：使用正确的状态值
+        "company_type": "他社",
         "preferred_locations": ["東京都", "千葉県"],
         "desired_rate_min": 50,
         "desired_rate_max": 70,
@@ -309,10 +309,10 @@ TEST_ENGINEERS = [
         ],
         "experience": "Web開発10年、フルスタック開発5年",
         "work_experience": "Web開発10年の経験。PHP→JavaScriptへの技術移行を経験。Vue.js + Node.jsでのフルスタック開発5年。中小企業の業務システム開発が得意分野。",
-        "japanese_level": "N1",
-        "english_level": "初級レベル",
-        "current_status": "available",
-        "company_type": "正社員",
+        "japanese_level": "日常会話レベル",
+        "english_level": "日常会話レベル",
+        "current_status": "提案中",  # 修复：使用数据库中存在的状态值
+        "company_type": "他社",
         "company_name": "株式会社ウェブソリューション",
         "preferred_locations": ["東京都"],
         "desired_rate_min": 45,
@@ -334,10 +334,10 @@ TEST_ENGINEERS = [
         "skills": ["React", "Vue.js", "Angular", "TypeScript", "Node.js", "GraphQL"],
         "experience": "フロントエンド開発4年",
         "work_experience": "React、Vue.js、Angularでのフロントエンド開発4年。SPA開発が得意。GraphQLでのAPI連携経験豊富。多言語サイト開発経験あり。",
-        "japanese_level": "N2",
-        "english_level": "ビジネスレベル",
-        "current_status": "available",
-        "company_type": "フリーランス",
+        "japanese_level": "日常会話レベル",
+        "english_level": "日常会話レベル",
+        "current_status": "提案中",  # 修复：使用正确的状态值
+        "company_type": "他社",
         "preferred_locations": ["東京都", "リモート"],
         "desired_rate_min": 55,
         "desired_rate_max": 75,
@@ -345,6 +345,57 @@ TEST_ENGINEERS = [
         "technical_keywords": ["Apollo", "Gatsby", "Storybook", "Jest", "多言語対応"],
     },
 ]
+
+
+async def check_database_constraints():
+    """检查数据库约束以获取正确的状态值"""
+    logger.info("🔍 检查数据库约束...")
+
+    try:
+        conn = await asyncpg.connect(settings.DATABASE_URL)
+
+        try:
+            # 查询engineers表的current_status字段约束
+            constraint_query = """
+            SELECT 
+                cc.check_clause
+            FROM information_schema.check_constraints cc
+            JOIN information_schema.constraint_column_usage cu 
+                ON cc.constraint_name = cu.constraint_name
+            WHERE cu.table_name = 'engineers' 
+                AND cu.column_name = 'current_status'
+                AND cc.constraint_name LIKE '%current_status%'
+            """
+
+            constraints = await conn.fetch(constraint_query)
+
+            if constraints:
+                for constraint in constraints:
+                    print(f"约束定义: {constraint['check_clause']}")
+            else:
+                print("没有找到current_status约束定义")
+
+            # 查询实际存在的状态值
+            existing_status_query = """
+            SELECT DISTINCT current_status 
+            FROM engineers 
+            WHERE current_status IS NOT NULL
+            """
+
+            existing_statuses = await conn.fetch(existing_status_query)
+
+            if existing_statuses:
+                print("现有的current_status值:")
+                for status in existing_statuses:
+                    print(f"  - {status['current_status']}")
+            else:
+                print("engineers表中没有现有数据")
+
+        finally:
+            await conn.close()
+
+    except Exception as e:
+        logger.error(f"检查数据库约束失败: {str(e)}")
 
 
 async def create_test_projects(conn):
@@ -401,7 +452,7 @@ async def create_test_projects(conn):
 
 
 async def create_test_engineers(conn):
-    """测试简历数据を作成"""
+    """测试简历数据を作成 - 修复版"""
     logger.info("👥 テストエンジニアデータを作成中...")
 
     engineer_ids = []
@@ -428,7 +479,7 @@ async def create_test_engineers(conn):
                 engineer_data["work_experience"],
                 engineer_data["japanese_level"],
                 engineer_data["english_level"],
-                engineer_data["current_status"],
+                engineer_data["current_status"],  # 现在使用正确的状态值
                 engineer_data["company_type"],
                 engineer_data.get("company_name"),
                 engineer_data["preferred_locations"],
@@ -448,6 +499,10 @@ async def create_test_engineers(conn):
             logger.error(
                 f"❌ エンジニア作成失敗: {engineer_data['name']}, エラー: {str(e)}"
             )
+            # 如果还有错误，打印详细的错误信息
+            import traceback
+
+            logger.error(f"详细错误: {traceback.format_exc()}")
 
     logger.info(f"✅ {len(engineer_ids)} 人のテストエンジニアを作成しました")
     return engineer_ids
@@ -470,15 +525,19 @@ async def clear_existing_test_data(conn):
 
         # プロジェクトをクリア
         project_count = await conn.fetchval(
-            "DELETE FROM projects WHERE tenant_id = $1 RETURNING COUNT(*)",
+            "SELECT COUNT(*) FROM projects WHERE tenant_id = $1",
             TEST_TENANT_ID,
         )
 
+        await conn.execute("DELETE FROM projects WHERE tenant_id = $1", TEST_TENANT_ID)
+
         # エンジニアをクリア
         engineer_count = await conn.fetchval(
-            "DELETE FROM engineers WHERE tenant_id = $1 RETURNING COUNT(*)",
+            "SELECT COUNT(*) FROM engineers WHERE tenant_id = $1",
             TEST_TENANT_ID,
         )
+
+        await conn.execute("DELETE FROM engineers WHERE tenant_id = $1", TEST_TENANT_ID)
 
         logger.info(
             f"✅ クリア完了: プロジェクト{project_count or 0}件, エンジニア{engineer_count or 0}件"
@@ -535,10 +594,13 @@ async def show_test_data_summary(conn):
 
 async def main():
     """メイン処理"""
-    print("🧪 AI匹配テストデータ作成ツール")
+    print("🧪 AI匹配テストデータ作成ツール - 修复版")
     print("=" * 50)
 
     try:
+        # 先检查数据库约束
+        await check_database_constraints()
+
         conn = await asyncpg.connect(settings.DATABASE_URL)
 
         try:
@@ -561,11 +623,18 @@ async def main():
             print(f"\n💡 テスト用租户ID: {TEST_TENANT_ID}")
             print("   この租户IDを使用してAPIテストを実行してください")
 
+            print(f"\n🔧 使用的current_status值:")
+            print("   - 提案中 (田中太郎, リー・ウェイ, 山田健, パク・ミンス)")
+            print("   - 稼働中 (佐藤花子, 鈴木一郎)")
+
         finally:
             await conn.close()
 
     except Exception as e:
         logger.error(f"❌ テストデータ作成失敗: {str(e)}")
+        import traceback
+
+        print(f"详细错误信息:\n{traceback.format_exc()}")
         raise
 
 
