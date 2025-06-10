@@ -1,565 +1,226 @@
 #!/usr/bin/env python3
-# ai_matching_debug.py - AI匹配问题诊断和修复脚本
+# debug_matching_api.py - 深度调试匹配API问题
 import asyncio
-import asyncpg
-import logging
 import sys
-import json
-import numpy as np
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple
-from uuid import UUID
 
 # 添加项目根目录到Python路径
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
-from app.config import settings
-
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
+from app.database import fetch_one, fetch_all
+from app.services.ai_matching_service import AIMatchingService
+from app.schemas.ai_matching_schemas import ProjectToEngineersMatchRequest
+from uuid import UUID
 
 
-class AIMatchingDebugger:
-    """AI匹配问题诊断器"""
+async def debug_matching_step_by_step():
+    """逐步调试匹配过程"""
+    print("🔍 深度调试匹配API问题")
+    print("=" * 80)
 
-    def __init__(self):
-        self.test_tenant_id = "33723dd6-cf28-4dab-975c-f883f5389d04"
+    tenant_id = "33723dd6-cf28-4dab-975c-f883f5389d04"
 
-    async def connect_db(self):
-        """连接数据库"""
-        return await asyncpg.connect(settings.DATABASE_URL)
-
-    async def check_data_quality(self):
-        """检查数据质量"""
-        print("🔍 检查数据质量")
-        print("=" * 60)
-
-        conn = await self.connect_db()
-        try:
-            # 1. 检查基础数据
-            project_stats = await conn.fetchrow(
-                """
-                SELECT 
-                    COUNT(*) as total,
-                    COUNT(ai_match_embedding) as with_embedding,
-                    COUNT(ai_match_paraphrase) as with_paraphrase,
-                    COUNT(CASE WHEN array_length(skills, 1) > 0 THEN 1 END) as with_skills
-                FROM projects 
-                WHERE tenant_id = $1 AND is_active = true
+    try:
+        # 1. 获取测试数据
+        print("📋 步骤1: 获取测试数据")
+        project = await fetch_one(
+            """
+            SELECT * FROM projects 
+            WHERE tenant_id = $1 AND is_active = true AND ai_match_embedding IS NOT NULL
+            ORDER BY created_at DESC LIMIT 1
             """,
-                self.test_tenant_id,
-            )
+            tenant_id,
+        )
 
-            engineer_stats = await conn.fetchrow(
-                """
-                SELECT 
-                    COUNT(*) as total,
-                    COUNT(ai_match_embedding) as with_embedding,
-                    COUNT(ai_match_paraphrase) as with_paraphrase,
-                    COUNT(CASE WHEN array_length(skills, 1) > 0 THEN 1 END) as with_skills
-                FROM engineers 
-                WHERE tenant_id = $1 AND is_active = true
+        engineers = await fetch_all(
+            """
+            SELECT * FROM engineers 
+            WHERE tenant_id = $1 AND is_active = true AND ai_match_embedding IS NOT NULL
+            ORDER BY created_at DESC
             """,
-                self.test_tenant_id,
+            tenant_id,
+        )
+
+        if not project:
+            print("❌ 没有找到测试项目")
+            return
+
+        if not engineers:
+            print("❌ 没有找到测试简历")
+            return
+
+        print(f"✅ 找到项目: {project['title']}")
+        print(f"✅ 找到 {len(engineers)} 个简历")
+
+        # 2. 创建AI匹配服务
+        print(f"\n🤖 步骤2: 创建AI匹配服务")
+        matching_service = AIMatchingService()
+        print(f"✅ AI模型加载: {matching_service.model_version}")
+
+        # 3. 测试相似度计算
+        print(f"\n📏 步骤3: 测试相似度计算")
+        project_embedding = project["ai_match_embedding"]
+        print(
+            f"项目embedding长度: {len(project_embedding) if project_embedding else 0}"
+        )
+
+        similarities = await matching_service._calculate_similarities_batch(
+            project_embedding, engineers, "engineers"
+        )
+
+        print(f"相似度计算结果: {len(similarities)} 个")
+        for i, (engineer, similarity) in enumerate(similarities[:3]):
+            print(f"  {i+1}. {engineer['name']}: {similarity:.4f}")
+
+        # 4. 测试详细匹配分数计算
+        print(f"\n🧮 步骤4: 测试详细匹配分数")
+        if engineers:
+            test_engineer = engineers[0]
+            detailed_scores = matching_service._calculate_detailed_match_scores(
+                project, test_engineer
             )
 
-            print(f"📊 项目数据:")
-            print(f"   总数: {project_stats['total']}")
-            print(f"   有embedding: {project_stats['with_embedding']}")
-            print(f"   有paraphrase: {project_stats['with_paraphrase']}")
-            print(f"   有技能: {project_stats['with_skills']}")
+            print(f"测试简历: {test_engineer['name']}")
+            print(f"技能匹配分数: {detailed_scores.get('skill_match', 0):.4f}")
+            print(f"经验匹配分数: {detailed_scores.get('experience_match', 0):.4f}")
+            print(f"日语匹配分数: {detailed_scores.get('japanese_level_match', 0):.4f}")
+            print(f"匹配技能: {detailed_scores.get('matched_skills', [])}")
 
-            print(f"\n📊 简历数据:")
-            print(f"   总数: {engineer_stats['total']}")
-            print(f"   有embedding: {engineer_stats['with_embedding']}")
-            print(f"   有paraphrase: {engineer_stats['with_paraphrase']}")
-            print(f"   有技能: {engineer_stats['with_skills']}")
-
-            if (
-                project_stats["with_embedding"] == 0
-                or engineer_stats["with_embedding"] == 0
-            ):
-                print("❌ 缺少embedding数据，请先运行 generate_embeddings.py")
-                return False
-
-            return True
-
-        finally:
-            await conn.close()
-
-    async def test_embedding_similarity(self):
-        """测试embedding相似度计算"""
-        print("\n🧮 测试embedding相似度计算")
-        print("=" * 60)
-
-        conn = await self.connect_db()
-        try:
-            # 获取两个有embedding的项目
-            projects = await conn.fetch(
-                """
-                SELECT id, title, ai_match_embedding, ai_match_paraphrase
-                FROM projects 
-                WHERE tenant_id = $1 AND is_active = true AND ai_match_embedding IS NOT NULL
-                LIMIT 5
-            """,
-                self.test_tenant_id,
+        # 5. 测试综合分数计算
+        print(f"\n⚖️ 步骤5: 测试综合分数计算")
+        if similarities:
+            engineer, similarity_score = similarities[0]
+            detailed_scores = matching_service._calculate_detailed_match_scores(
+                project, engineer
             )
 
-            engineers = await conn.fetch(
-                """
-                SELECT id, name, ai_match_embedding, ai_match_paraphrase
-                FROM engineers 
-                WHERE tenant_id = $1 AND is_active = true AND ai_match_embedding IS NOT NULL
-                LIMIT 5
-            """,
-                self.test_tenant_id,
+            final_score = matching_service._calculate_weighted_score(
+                detailed_scores,
+                {
+                    "skill_match": 0.5,
+                    "experience_match": 0.3,
+                    "japanese_level_match": 0.2,
+                },
+                similarity_score,
             )
 
-            if not projects or not engineers:
-                print("❌ 没有足够的测试数据")
-                return
-
-            print(f"🎯 测试数据: {len(projects)}个项目, {len(engineers)}个简历")
-
-            # 测试项目之间的相似度
-            if len(projects) >= 2:
-                p1, p2 = projects[0], projects[1]
-                similarity = await conn.fetchval(
-                    """
-                    SELECT 1 - (ai_match_embedding <#> $1) as similarity
-                    FROM projects WHERE id = $2
-                """,
-                    p1["ai_match_embedding"],
-                    p2["id"],
-                )
-
-                print(f"\n📏 项目间相似度测试:")
-                print(f"   项目1: {p1['title'][:30]}...")
-                print(f"   项目2: {p2['title'][:30]}...")
-                print(f"   相似度: {similarity:.4f}")
-
-            # 测试项目和简历的相似度
-            if projects and engineers:
-                p = projects[0]
-                e = engineers[0]
-
-                # 使用正确的相似度计算
-                similarity_raw = await conn.fetchval(
-                    """
-                    SELECT $1::vector <#> $2::vector as distance
-                """,
-                    p["ai_match_embedding"],
-                    e["ai_match_embedding"],
-                )
-
-                similarity = 1 - similarity_raw  # 转换距离为相似度
-
-                print(f"\n🎯 项目-简历相似度测试:")
-                print(f"   项目: {p['title'][:30]}...")
-                print(f"   简历: {e['name']}")
-                print(f"   余弦距离: {similarity_raw:.4f}")
-                print(f"   相似度分数: {similarity:.4f}")
-
-                # 测试批量相似度计算
-                print(f"\n🔄 批量相似度计算测试:")
-                engineer_ids = [e["id"] for e in engineers]
-                similarities = await conn.fetch(
-                    """
-                    SELECT id, name, 1 - (ai_match_embedding <#> $1) as similarity
-                    FROM engineers 
-                    WHERE id = ANY($2) AND ai_match_embedding IS NOT NULL
-                    ORDER BY similarity DESC
-                """,
-                    p["ai_match_embedding"],
-                    engineer_ids,
-                )
-
-                for i, sim in enumerate(similarities[:3], 1):
-                    print(f"   {i}. {sim['name']}: {sim['similarity']:.4f}")
-
-        finally:
-            await conn.close()
-
-    async def test_detailed_matching_logic(self):
-        """测试详细匹配逻辑"""
-        print("\n🔧 测试详细匹配逻辑")
-        print("=" * 60)
-
-        conn = await self.connect_db()
-        try:
-            # 获取测试项目和简历
-            project = await conn.fetchrow(
-                """
-                SELECT * FROM projects 
-                WHERE tenant_id = $1 AND is_active = true AND ai_match_embedding IS NOT NULL
-                AND array_length(skills, 1) > 0
-                LIMIT 1
-            """,
-                self.test_tenant_id,
-            )
-
-            engineer = await conn.fetchrow(
-                """
-                SELECT * FROM engineers 
-                WHERE tenant_id = $1 AND is_active = true AND ai_match_embedding IS NOT NULL
-                AND array_length(skills, 1) > 0
-                LIMIT 1
-            """,
-                self.test_tenant_id,
-            )
-
-            if not project or not engineer:
-                print("❌ 没有足够的测试数据")
-                return
-
-            print(f"🎯 测试匹配:")
-            print(f"   项目: {project['title']}")
-            print(f"   简历: {engineer['name']}")
-
-            # 测试技能匹配
-            project_skills = set(project["skills"] or [])
-            engineer_skills = set(engineer["skills"] or [])
-
-            matched_skills = project_skills.intersection(engineer_skills)
-            missing_skills = project_skills - engineer_skills
-            skill_match_score = (
-                len(matched_skills) / len(project_skills) if project_skills else 0.5
-            )
-
-            print(f"\n🛠️ 技能匹配分析:")
-            print(f"   项目技能: {list(project_skills)}")
-            print(f"   简历技能: {list(engineer_skills)}")
-            print(f"   匹配技能: {list(matched_skills)}")
-            print(f"   缺失技能: {list(missing_skills)}")
-            print(f"   技能匹配分数: {skill_match_score:.3f}")
-
-            # 测试语义相似度
-            similarity_distance = await conn.fetchval(
-                """
-                SELECT $1::vector <#> $2::vector
-            """,
-                project["ai_match_embedding"],
-                engineer["ai_match_embedding"],
-            )
-
-            similarity_score = max(0, 1 - similarity_distance)
-
-            print(f"\n🧠 语义相似度:")
-            print(f"   余弦距离: {similarity_distance:.4f}")
-            print(f"   相似度分数: {similarity_score:.4f}")
-
-            # 计算综合分数
-            weights = {"skill_match": 0.3, "similarity": 0.3, "other_factors": 0.4}
-
-            # 简化的其他因素分数
-            other_score = 0.7  # 假设其他因素的平均分数
-
-            final_score = (
-                skill_match_score * weights["skill_match"]
-                + similarity_score * weights["similarity"]
-                + other_score * weights["other_factors"]
-            )
-
-            print(f"\n🎯 综合评分:")
-            print(f"   技能权重分: {skill_match_score * weights['skill_match']:.3f}")
-            print(f"   相似度权重分: {similarity_score * weights['similarity']:.3f}")
-            print(f"   其他因素权重分: {other_score * weights['other_factors']:.3f}")
-            print(f"   最终分数: {final_score:.3f}")
-
-            return final_score
-
-        finally:
-            await conn.close()
-
-    async def test_candidate_filtering(self):
-        """测试候选过滤逻辑"""
-        print("\n🔍 测试候选过滤逻辑")
-        print("=" * 60)
-
-        conn = await self.connect_db()
-        try:
-            # 测试获取候选简历的查询
-            total_engineers = await conn.fetchval(
-                """
-                SELECT COUNT(*) FROM engineers 
-                WHERE tenant_id = $1 AND is_active = true
-            """,
-                self.test_tenant_id,
-            )
-
-            engineers_with_embedding = await conn.fetchval(
-                """
-                SELECT COUNT(*) FROM engineers 
-                WHERE tenant_id = $1 AND is_active = true AND ai_match_embedding IS NOT NULL
-            """,
-                self.test_tenant_id,
-            )
-
-            print(f"📊 简历筛选统计:")
-            print(f"   总活跃简历: {total_engineers}")
-            print(f"   有embedding的简历: {engineers_with_embedding}")
-            print(
-                f"   筛选率: {engineers_with_embedding/total_engineers*100:.1f}%"
-                if total_engineers > 0
-                else "   筛选率: 0%"
-            )
-
-            # 测试不同的筛选条件
-            filters_tests = [
-                ("无筛选", {}),
-                ("日语水平筛选", {"japanese_level": ["N1", "N2"]}),
-                ("状态筛选", {"current_status": ["available"]}),
-            ]
-
-            for filter_name, filters in filters_tests:
-                base_query = """
-                    SELECT COUNT(*) FROM engineers 
-                    WHERE tenant_id = $1 AND is_active = true AND ai_match_embedding IS NOT NULL
-                """
-                params = [self.test_tenant_id]
-                conditions = []
-
-                if "japanese_level" in filters:
-                    conditions.append(f"japanese_level = ANY(${len(params) + 1})")
-                    params.append(filters["japanese_level"])
-
-                if "current_status" in filters:
-                    conditions.append(f"current_status = ANY(${len(params) + 1})")
-                    params.append(filters["current_status"])
-
-                if conditions:
-                    query = base_query + " AND " + " AND ".join(conditions)
-                else:
-                    query = base_query
-
-                count = await conn.fetchval(query, *params)
-                print(f"   {filter_name}: {count}个候选")
-
-        finally:
-            await conn.close()
-
-    async def run_enhanced_matching_test(self):
-        """运行增强的匹配测试"""
-        print("\n🚀 运行增强的匹配测试")
-        print("=" * 60)
-
-        conn = await self.connect_db()
-        try:
-            # 获取测试项目
-            project = await conn.fetchrow(
-                """
-                SELECT * FROM projects 
-                WHERE tenant_id = $1 AND is_active = true AND ai_match_embedding IS NOT NULL
-                ORDER BY created_at DESC LIMIT 1
-            """,
-                self.test_tenant_id,
-            )
-
-            if not project:
-                print("❌ 没有可用的测试项目")
-                return
-
-            # 获取候选简历（降低门槛）
-            engineers = await conn.fetch(
-                """
-                SELECT * FROM engineers 
-                WHERE tenant_id = $1 AND is_active = true AND ai_match_embedding IS NOT NULL
-                ORDER BY created_at DESC LIMIT 20
-            """,
-                self.test_tenant_id,
-            )
-
-            if not engineers:
-                print("❌ 没有可用的测试简历")
-                return
-
-            print(f"🎯 测试项目: {project['title']}")
-            print(f"📋 候选简历: {len(engineers)}个")
-
-            # 计算匹配分数
-            matches = []
-
-            for engineer in engineers:
-                try:
-                    # 计算相似度
-                    similarity_distance = await conn.fetchval(
-                        """
-                        SELECT $1::vector <#> $2::vector
-                    """,
-                        project["ai_match_embedding"],
-                        engineer["ai_match_embedding"],
-                    )
-
-                    similarity_score = max(0, 1 - similarity_distance)
-
-                    # 计算技能匹配
-                    project_skills = set(project["skills"] or [])
-                    engineer_skills = set(engineer["skills"] or [])
-
-                    if project_skills:
-                        matched_skills = project_skills.intersection(engineer_skills)
-                        skill_match_score = len(matched_skills) / len(project_skills)
-                    else:
-                        skill_match_score = 0.5
-
-                    # 简化的综合分数计算
-                    final_score = (
-                        similarity_score * 0.4 + skill_match_score * 0.4 + 0.2 * 0.7
-                    )
-
-                    matches.append(
-                        {
-                            "engineer_id": engineer["id"],
-                            "engineer_name": engineer["name"],
-                            "similarity_score": similarity_score,
-                            "skill_match_score": skill_match_score,
-                            "final_score": final_score,
-                            "matched_skills": list(
-                                project_skills.intersection(engineer_skills)
-                            ),
-                        }
-                    )
-
-                except Exception as e:
-                    print(f"   ❌ 计算匹配失败: {engineer['name']} - {str(e)}")
-                    continue
-
-            # 排序并显示结果
-            matches.sort(key=lambda x: x["final_score"], reverse=True)
-
-            print(f"\n📈 匹配结果 (前10名):")
-            print("-" * 80)
-
-            for i, match in enumerate(matches[:10], 1):
-                print(
-                    f"{i:2d}. {match['engineer_name']:<20} "
-                    f"总分: {match['final_score']:.3f} "
-                    f"相似度: {match['similarity_score']:.3f} "
-                    f"技能: {match['skill_match_score']:.3f} "
-                    f"匹配技能: {match['matched_skills']}"
-                )
-
-            # 分析低分原因
-            if matches:
-                avg_similarity = np.mean([m["similarity_score"] for m in matches])
-                avg_skill = np.mean([m["skill_match_score"] for m in matches])
-                avg_final = np.mean([m["final_score"] for m in matches])
-
-                print(f"\n📊 分数分析:")
-                print(f"   平均相似度分数: {avg_similarity:.3f}")
-                print(f"   平均技能分数: {avg_skill:.3f}")
-                print(f"   平均最终分数: {avg_final:.3f}")
-
-                # 检查是否有高分匹配
-                high_score_count = len([m for m in matches if m["final_score"] >= 0.6])
-                medium_score_count = len(
-                    [m for m in matches if 0.3 <= m["final_score"] < 0.6]
-                )
-                low_score_count = len([m for m in matches if m["final_score"] < 0.3])
-
-                print(f"\n🎯 分数分布:")
-                print(f"   高分 (≥0.6): {high_score_count}个")
-                print(f"   中分 (0.3-0.6): {medium_score_count}个")
-                print(f"   低分 (<0.3): {low_score_count}个")
-
-                if high_score_count == 0:
-                    print("\n⚠️ 建议:")
-                    if avg_similarity < 0.3:
-                        print("   - 语义相似度过低，考虑改善embedding质量")
-                    if avg_skill < 0.3:
-                        print("   - 技能匹配度过低，检查技能数据完整性")
-                    print("   - 考虑降低min_score阈值到0.2-0.4")
-                    print("   - 调整权重配置，增加相似度权重")
-
-            return len(matches), matches[:5] if matches else []
-
-        finally:
-            await conn.close()
-
-    async def generate_recommendations(self):
-        """生成优化建议"""
-        print("\n💡 优化建议")
-        print("=" * 60)
-
-        recommendations = []
-
-        # 1. 检查数据质量
-        data_ok = await self.check_data_quality()
-        if not data_ok:
-            recommendations.append("首先确保所有项目和简历都有embedding数据")
-            recommendations.append(
-                "运行: python generate_embeddings.py --type both --force"
-            )
-            return recommendations
-
-        # 2. 测试匹配效果
-        match_count, top_matches = await self.run_enhanced_matching_test()
-
-        if match_count == 0:
-            recommendations.extend(
-                [
-                    "没有找到任何匹配，建议:",
-                    "1. 检查embedding生成是否正确",
-                    "2. 验证数据库中的vector字段格式",
-                    "3. 确认tenant_id是否正确",
-                ]
-            )
-        elif not any(m["final_score"] >= 0.6 for m in top_matches):
-            avg_score = (
-                np.mean([m["final_score"] for m in top_matches]) if top_matches else 0
-            )
-            recommendations.extend(
-                [
-                    f"匹配分数普遍较低 (平均: {avg_score:.3f})，建议:",
-                    "1. 降低min_score阈值到0.2-0.4",
-                    "2. 调整权重配置，增加语义相似度权重",
-                    "3. 改善项目和简历的描述质量",
-                    "4. 检查技能标签的一致性",
-                ]
-            )
+            print(f"语义相似度: {similarity_score:.4f}")
+            print(f"综合分数: {final_score:.4f}")
+            print(f"分数是否在0-1范围: {0 <= final_score <= 1}")
+
+        # 6. 调用完整匹配流程
+        print(f"\n🎯 步骤6: 调用完整匹配流程")
+
+        # 创建请求对象
+        request = ProjectToEngineersMatchRequest(
+            tenant_id=UUID(tenant_id),
+            project_id=project["id"],
+            max_matches=10,
+            min_score=0.0,  # 设为0以获取所有结果
+            executed_by=None,
+            matching_type="project_to_engineers",
+            trigger_type="manual",
+            weights={
+                "skill_match": 0.5,
+                "experience_match": 0.3,
+                "japanese_level_match": 0.2,
+            },
+            filters={},
+        )
+
+        print("开始完整匹配流程...")
+
+        # 手动调用匹配流程的各个步骤
+        print("  - 获取项目信息...")
+        project_info = await matching_service._get_project_info(
+            request.project_id, request.tenant_id
+        )
+        print(f"    项目信息: {project_info['title'] if project_info else '未找到'}")
+
+        print("  - 获取候选简历...")
+        candidate_engineers = await matching_service._get_candidate_engineers(
+            request.tenant_id, request.filters or {}
+        )
+        print(f"    候选简历数: {len(candidate_engineers)}")
+
+        print("  - 执行匹配计算...")
+        matches = await matching_service._calculate_project_engineer_matches(
+            project_info,
+            candidate_engineers,
+            request.weights or {},
+            request.max_matches,
+            request.min_score,
+            UUID("00000000-0000-0000-0000-000000000000"),  # 临时ID
+        )
+
+        print(f"    匹配结果数: {len(matches)}")
+
+        if matches:
+            print("    前3个匹配:")
+            for i, match in enumerate(matches[:3]):
+                print(f"    {i+1}. {match.engineer_name}: {match.match_score:.4f}")
         else:
-            recommendations.append("✅ 匹配效果良好，系统工作正常")
+            print("    ❌ 没有找到任何匹配")
 
-        for i, rec in enumerate(recommendations, 1):
-            print(f"{i}. {rec}")
+            # 详细分析为什么没有匹配
+            print("\n🔍 分析无匹配原因:")
+            if not candidate_engineers:
+                print("    - 没有候选简历")
+            else:
+                print(f"    - 有 {len(candidate_engineers)} 个候选简历")
 
-        return recommendations
+                # 检查第一个候选的详细计算
+                if candidate_engineers:
+                    test_engineer = candidate_engineers[0]
+                    print(f"    - 测试简历: {test_engineer['name']}")
+
+                    # 检查embedding
+                    if not test_engineer.get("ai_match_embedding"):
+                        print("      ❌ 简历缺少embedding")
+                    else:
+                        print("      ✅ 简历有embedding")
+
+                    # 计算相似度
+                    test_similarities = (
+                        await matching_service._calculate_similarities_batch(
+                            project_info["ai_match_embedding"],
+                            [test_engineer],
+                            "engineers",
+                        )
+                    )
+
+                    if test_similarities:
+                        _, test_similarity = test_similarities[0]
+                        print(f"      语义相似度: {test_similarity:.4f}")
+
+                        # 计算详细分数
+                        test_detailed = (
+                            matching_service._calculate_detailed_match_scores(
+                                project_info, test_engineer
+                            )
+                        )
+
+                        # 计算最终分数
+                        test_final = matching_service._calculate_weighted_score(
+                            test_detailed, request.weights or {}, test_similarity
+                        )
+
+                        print(f"      最终分数: {test_final:.4f}")
+                        print(f"      最小分数要求: {request.min_score}")
+                        print(f"      是否通过: {test_final >= request.min_score}")
+                    else:
+                        print("      ❌ 相似度计算失败")
+
+    except Exception as e:
+        print(f"❌ 调试过程出错: {str(e)}")
+        import traceback
+
+        print(f"详细错误:\n{traceback.format_exc()}")
 
 
 async def main():
-    """主函数"""
-    print("🔍 AI匹配问题诊断工具")
-    print("=" * 80)
-
-    debugger = AIMatchingDebugger()
-
-    try:
-        # 1. 检查数据质量
-        await debugger.check_data_quality()
-
-        # 2. 测试embedding相似度
-        await debugger.test_embedding_similarity()
-
-        # 3. 测试详细匹配逻辑
-        await debugger.test_detailed_matching_logic()
-
-        # 4. 测试候选过滤
-        await debugger.test_candidate_filtering()
-
-        # 5. 运行增强测试
-        await debugger.run_enhanced_matching_test()
-
-        # 6. 生成建议
-        await debugger.generate_recommendations()
-
-    except Exception as e:
-        print(f"❌ 诊断过程中出现错误: {str(e)}")
-        import traceback
-
-        print(f"详细错误信息:\n{traceback.format_exc()}")
+    await debug_matching_step_by_step()
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-# app/services/ai_matching_service.py - 完整修复版
+# app/services/ai_matching_service.py - 简化版（只匹配技能、经验、日语水平）
 import asyncio
 import json
 import time
@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 
 class AIMatchingService:
-    """AI匹配服务"""
+    """AI匹配服务 - 简化版（只匹配技能、经验、日语水平）"""
 
     def __init__(self):
         self.model = None
@@ -78,7 +78,6 @@ class AIMatchingService:
         if value is None:
             return []
         if isinstance(value, list):
-            # 确保列表中的元素是UUID格式
             try:
                 return [UUID(str(item)) for item in value]
             except (ValueError, TypeError):
@@ -97,7 +96,6 @@ class AIMatchingService:
 
     def _format_matching_history(self, history_data: Dict[str, Any]) -> Dict[str, Any]:
         """格式化匹配历史数据"""
-        # 确保JSONB字段正确解析
         history_data["ai_config"] = self._parse_jsonb_field(
             history_data.get("ai_config")
         )
@@ -106,7 +104,6 @@ class AIMatchingService:
         )
         history_data["filters"] = self._parse_jsonb_field(history_data.get("filters"))
 
-        # 确保列表字段正确处理
         if isinstance(history_data.get("project_ids"), str):
             try:
                 history_data["project_ids"] = json.loads(history_data["project_ids"])
@@ -466,7 +463,6 @@ class AIMatchingService:
     ) -> Dict[str, Any]:
         """创建匹配历史记录"""
         async with get_db_connection() as conn:
-            # 确保存储的是有效的JSON字符串（某些asyncpg版本需要这样处理）
             filters_json = json.dumps(filters or {})
             project_ids_list = project_ids or []
             engineer_ids_list = engineer_ids or []
@@ -486,12 +482,12 @@ class AIMatchingService:
                 executed_by,
                 matching_type,
                 trigger_type,
-                project_ids_list,  # 列表可以直接传递
+                project_ids_list,
                 engineer_ids_list,
-                filters_json,  # 转换为JSON字符串
+                filters_json,
                 self.model_version,
-                ai_config_json,  # 转换为JSON字符串
-                statistics_json,  # 转换为JSON字符串
+                ai_config_json,
+                statistics_json,
             )
 
             # 获取创建的记录并格式化
@@ -517,7 +513,6 @@ class AIMatchingService:
     ):
         """更新匹配历史"""
         async with get_db_connection() as conn:
-            # 准备统计数据并转换为JSON字符串
             statistics = {
                 "total_projects_input": total_projects_input,
                 "total_engineers_input": total_engineers_input,
@@ -526,7 +521,6 @@ class AIMatchingService:
                 "processing_time_seconds": processing_time_seconds,
             }
 
-            # 转换为JSON字符串
             ai_config_json = json.dumps(ai_config or {})
             statistics_json = json.dumps(statistics)
 
@@ -560,8 +554,8 @@ class AIMatchingService:
                 high_quality_matches,
                 processing_time_seconds,
                 error_message,
-                ai_config_json,  # 使用JSON字符串
-                statistics_json,  # 使用JSON字符串
+                ai_config_json,
+                statistics_json,
                 project_ids,
                 engineer_ids,
             )
@@ -661,7 +655,7 @@ class AIMatchingService:
         min_score: float,
         matching_history_id: UUID,
     ) -> List[MatchResult]:
-        """计算案件-简历匹配"""
+        """计算案件-简历匹配（简化版）"""
         matches = []
 
         # 使用pgvector进行相似度计算
@@ -678,9 +672,9 @@ class AIMatchingService:
 
         for engineer, similarity_score in engineer_similarities:
             try:
-                # 计算详细匹配分数
+                # 计算详细匹配分数（只保留3个维度）
                 detailed_scores = self._calculate_detailed_match_scores(
-                    project_info, engineer, "project_to_engineer"
+                    project_info, engineer
                 )
 
                 # 计算综合匹配分数
@@ -702,16 +696,17 @@ class AIMatchingService:
                         confidence_score=round(
                             similarity_score * 0.8 + final_score * 0.2, 3
                         ),
+                        # 只保留3个核心分数
                         skill_match_score=detailed_scores.get("skill_match"),
                         experience_match_score=detailed_scores.get("experience_match"),
-                        project_experience_match_score=detailed_scores.get(
-                            "project_experience_match"
-                        ),
                         japanese_level_match_score=detailed_scores.get(
                             "japanese_level_match"
                         ),
-                        budget_match_score=detailed_scores.get("budget_match"),
-                        location_match_score=detailed_scores.get("location_match"),
+                        # 其他分数设为None
+                        project_experience_match_score=None,
+                        budget_match_score=None,
+                        location_match_score=None,
+                        # 简化的匹配详情
                         matched_skills=detailed_scores.get("matched_skills", []),
                         missing_skills=detailed_scores.get("missing_skills", []),
                         matched_experiences=detailed_scores.get(
@@ -720,12 +715,9 @@ class AIMatchingService:
                         missing_experiences=detailed_scores.get(
                             "missing_experiences", []
                         ),
-                        project_experience_match=detailed_scores.get(
-                            "project_experience_match_list", []
-                        ),
-                        missing_project_experience=detailed_scores.get(
-                            "missing_project_experience", []
-                        ),
+                        # 清空不需要的字段
+                        project_experience_match=[],
+                        missing_project_experience=[],
                         match_reasons=reasons,
                         concerns=concerns,
                         project_title=project_info.get("title"),
@@ -772,22 +764,32 @@ class AIMatchingService:
 
         # 转换距离为相似度分数 (cosine distance -> cosine similarity)
         results = []
-        similarity_dict = {s["id"]: 1 - s["similarity_distance"] for s in similarities}
+        similarity_dict = {}
+
+        for s in similarities:
+            distance = s["similarity_distance"]
+            # 确保距离在合理范围内，cosine distance应该在0-2之间
+            distance = max(0, min(2, distance))
+            # 转换为相似度分数：cosine_similarity = 1 - cosine_distance
+            similarity_score = 1 - distance
+            # 确保相似度在0-1之间
+            similarity_score = max(0, min(1, similarity_score))
+            similarity_dict[s["id"]] = similarity_score
 
         for candidate in candidates:
             if candidate["id"] in similarity_dict:
-                similarity_score = max(0, similarity_dict[candidate["id"]])  # 确保非负
+                similarity_score = similarity_dict[candidate["id"]]
                 results.append((candidate, similarity_score))
 
         return results
 
     def _calculate_detailed_match_scores(
-        self, project: Dict[str, Any], engineer: Dict[str, Any], direction: str
+        self, project: Dict[str, Any], engineer: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """计算详细匹配分数"""
+        """计算详细匹配分数（简化版 - 只保留3个维度）"""
         scores = {}
 
-        # 技能匹配
+        # 1. 技能匹配
         project_skills = set(project.get("skills", []))
         engineer_skills = set(engineer.get("skills", []))
 
@@ -801,63 +803,86 @@ class AIMatchingService:
             scores["missing_skills"] = []
             scores["skill_match"] = 0.5  # 无特定要求时给中等分数
 
-        # 经验匹配 (简化实现，实际可以更复杂)
+        # 2. 经验匹配（改进版）
         project_exp = project.get("experience", "").lower()
         engineer_exp = engineer.get("experience", "").lower()
 
-        # 简单的经验关键词匹配
-        exp_keywords = ["年", "経験", "開発", "設計", "運用", "保守"]
-        matched_exp = [
-            kw for kw in exp_keywords if kw in project_exp and kw in engineer_exp
-        ]
+        # 改进的经验关键词匹配
+        exp_keywords = {
+            "年": 0.1,  # 年数关键词
+            "経験": 0.2,  # 经验关键词
+            "開発": 0.2,  # 开发经验
+            "設計": 0.15,  # 设计经验
+            "運用": 0.1,  # 运维经验
+            "保守": 0.1,  # 维护经验
+            "管理": 0.1,  # 管理经验
+            "リーダー": 0.05,  # 领导经验
+        }
+
+        matched_exp = []
+        total_exp_weight = 0
+        matched_exp_weight = 0
+
+        for keyword, weight in exp_keywords.items():
+            if keyword in project_exp:
+                total_exp_weight += weight
+                if keyword in engineer_exp:
+                    matched_exp.append(keyword)
+                    matched_exp_weight += weight
 
         scores["matched_experiences"] = matched_exp
         scores["missing_experiences"] = [
-            kw for kw in exp_keywords if kw in project_exp and kw not in engineer_exp
+            kw
+            for kw in exp_keywords.keys()
+            if kw in project_exp and kw not in engineer_exp
         ]
-        scores["experience_match"] = len(matched_exp) / max(len(exp_keywords), 1)
 
-        # 日语水平匹配
+        # 计算经验匹配分数（基于权重）
+        if total_exp_weight > 0:
+            scores["experience_match"] = matched_exp_weight / total_exp_weight
+        else:
+            scores["experience_match"] = 0.7  # 没有明确经验要求时给较高分数
+
+        # 3. 日语水平匹配（改进版）
         project_jp = project.get("japanese_level", "")
         engineer_jp = engineer.get("japanese_level", "")
-        jp_levels = {"N1": 5, "N2": 4, "N3": 3, "N4": 2, "N5": 1, "": 0}
 
-        if project_jp and engineer_jp:
-            project_jp_score = jp_levels.get(project_jp, 0)
-            engineer_jp_score = jp_levels.get(engineer_jp, 0)
-            scores["japanese_level_match"] = min(
-                engineer_jp_score / max(project_jp_score, 1), 1.0
-            )
+        # 日语等级映射（分数越高越好）
+        jp_levels = {
+            "N1": 5,
+            "N2": 4,
+            "N3": 3,
+            "N4": 2,
+            "N5": 1,
+            "ネイティブ": 6,
+            "native": 6,
+            "母语": 6,
+            "": 0,
+        }
+
+        project_jp_score = jp_levels.get(project_jp, 0)
+        engineer_jp_score = jp_levels.get(engineer_jp, 0)
+
+        if project_jp_score > 0:
+            # 有明确日语要求
+            if engineer_jp_score >= project_jp_score:
+                scores["japanese_level_match"] = 1.0  # 完全满足
+            elif engineer_jp_score > 0:
+                # 部分满足，按比例计算
+                scores["japanese_level_match"] = engineer_jp_score / project_jp_score
+            else:
+                scores["japanese_level_match"] = 0.2  # 完全不满足但给最低分
         else:
-            scores["japanese_level_match"] = 0.8  # 没有明确要求时给较高分数
+            # 没有明确日语要求
+            if engineer_jp_score > 0:
+                scores["japanese_level_match"] = 0.9  # 有日语能力加分
+            else:
+                scores["japanese_level_match"] = 0.7  # 中性分数
 
-        # 地点匹配
-        project_location = project.get("location", "").lower()
-        engineer_locations = [
-            loc.lower() for loc in engineer.get("preferred_locations", [])
-        ]
-
-        if project_location and engineer_locations:
-            location_match = any(
-                project_location in loc or loc in project_location
-                for loc in engineer_locations
-            )
-            scores["location_match"] = (
-                1.0 if location_match else 0.3
-            )  # 地点不匹配但可能远程
-        else:
-            scores["location_match"] = 0.7  # 没有明确要求时给中等偏上分数
-
-        # 预算匹配 (简化实现)
-        project_budget = project.get("budget", "")
-        engineer_rate_min = engineer.get("desired_rate_min", 0)
-        engineer_rate_max = engineer.get("desired_rate_max", 0)
-
-        # 简单的预算匹配逻辑 (可以根据实际需求完善)
-        if project_budget and (engineer_rate_min or engineer_rate_max):
-            scores["budget_match"] = 0.7  # 简化为固定值，实际应该解析预算文本
-        else:
-            scores["budget_match"] = 0.8
+        # 确保所有分数都在0-1范围内
+        for key in ["skill_match", "experience_match", "japanese_level_match"]:
+            if key in scores:
+                scores[key] = max(0, min(1, scores[key]))
 
         return scores
 
@@ -867,21 +892,21 @@ class AIMatchingService:
         weights: Dict[str, float],
         similarity_score: float,
     ) -> float:
-        """计算加权综合分数"""
-        # 默认权重
+        """计算加权综合分数（简化版 - 只考虑3个维度）"""
+        # 确保相似度分数在0-1范围内
+        similarity_score = max(0, min(1, similarity_score))
+
+        # 默认权重（只有3个维度）
         default_weights = {
-            "skill_match": 0.3,
-            "experience_match": 0.2,
-            "project_experience_match": 0.15,
-            "japanese_level_match": 0.15,
-            "budget_match": 0.1,
-            "location_match": 0.1,
+            "skill_match": 0.5,  # 技能匹配权重最高
+            "experience_match": 0.3,  # 经验匹配次之
+            "japanese_level_match": 0.2,  # 日语水平权重最低
         }
 
         # 合并用户自定义权重
         final_weights = {**default_weights, **weights}
 
-        # 计算加权分数
+        # 计算加权分数（只考虑这3个维度）
         weighted_sum = 0
         total_weight = 0
 
@@ -890,21 +915,27 @@ class AIMatchingService:
                 score_type in detailed_scores
                 and detailed_scores[score_type] is not None
             ):
-                weighted_sum += detailed_scores[score_type] * weight
+                score = detailed_scores[score_type]
+                # 确保每个分数都在0-1范围内
+                score = max(0, min(1, score))
+                weighted_sum += score * weight
                 total_weight += weight
 
         # 基础分数
         base_score = weighted_sum / total_weight if total_weight > 0 else 0
+        # 确保基础分数在0-1范围内
+        base_score = max(0, min(1, base_score))
 
         # 结合语义相似度 (权重 0.7 结构化匹配 + 0.3 语义相似度)
         final_score = base_score * 0.7 + similarity_score * 0.3
 
-        return min(final_score, 1.0)
+        # 确保最终分数在0-1范围内
+        return max(0, min(1, final_score))
 
     def _generate_match_analysis(
         self, project: Dict[str, Any], engineer: Dict[str, Any], scores: Dict[str, Any]
     ) -> Tuple[List[str], List[str]]:
-        """生成匹配分析"""
+        """生成匹配分析（简化版）"""
         reasons = []
         concerns = []
 
@@ -936,19 +967,12 @@ class AIMatchingService:
         elif exp_score < 0.3:
             concerns.append("相关经验不足")
 
-        # 地点分析
-        location_score = scores.get("location_match", 0)
-        if location_score >= 0.8:
-            reasons.append("地点匹配良好")
-        elif location_score < 0.4:
-            concerns.append("地点可能不匹配")
-
         return reasons, concerns
 
     async def _save_matches(
         self, matches: List[MatchResult], matching_history_id: UUID
     ) -> List[MatchResult]:
-        """保存匹配结果"""
+        """保存匹配结果（简化版）"""
         if not matches:
             return []
 
@@ -957,17 +981,15 @@ class AIMatchingService:
         async with get_db_connection() as conn:
             for match in matches:
                 try:
-                    # 插入匹配记录
+                    # 插入匹配记录（只保留核心字段）
                     await conn.execute(
                         """
                         INSERT INTO project_engineer_matches (
                             id, tenant_id, project_id, engineer_id, matching_history_id,
                             match_score, confidence_score, skill_match_score, experience_match_score,
-                            project_experience_match_score, japanese_level_match_score,
-                            budget_match_score, location_match_score, matched_skills, missing_skills,
-                            matched_experiences, missing_experiences, project_experience_match,
-                            missing_project_experience, match_reasons, concerns, status
-                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+                            japanese_level_match_score, matched_skills, missing_skills,
+                            matched_experiences, missing_experiences, match_reasons, concerns, status
+                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
                         """,
                         match.id,
                         # 需要从project或engineer获取tenant_id
@@ -981,16 +1003,11 @@ class AIMatchingService:
                         match.confidence_score,
                         match.skill_match_score,
                         match.experience_match_score,
-                        match.project_experience_match_score,
                         match.japanese_level_match_score,
-                        match.budget_match_score,
-                        match.location_match_score,
                         match.matched_skills,
                         match.missing_skills,
                         match.matched_experiences,
                         match.missing_experiences,
-                        match.project_experience_match,
-                        match.missing_project_experience,
                         match.match_reasons,
                         match.concerns,
                         match.status,
@@ -1023,7 +1040,8 @@ class AIMatchingService:
             "title": project.get("title", ""),
             "company": project.get("client_company", ""),
             "skills": project.get("skills", []),
-            "location": project.get("location", ""),
+            "experience": project.get("experience", ""),
+            "japanese_level": project.get("japanese_level", ""),
             "status": project.get("status", ""),
         }
 
@@ -1047,7 +1065,7 @@ class AIMatchingService:
         if not matches:
             recommendations.append("没有找到匹配的简历，建议调整需求条件")
         elif len([m for m in matches if m.match_score >= 0.8]) == 0:
-            recommendations.append("高质量匹配较少，建议放宽技能要求或预算")
+            recommendations.append("高质量匹配较少，建议放宽技能要求")
 
         if len(matches) >= 5:
             recommendations.append("建议优先联系前3名高分候选人")
@@ -1176,7 +1194,7 @@ class AIMatchingService:
         min_score: float,
         matching_history_id: UUID,
     ) -> List[MatchResult]:
-        """计算简历-案件匹配"""
+        """计算简历-案件匹配（简化版）"""
         matches = []
 
         # 使用pgvector进行相似度计算
@@ -1195,7 +1213,7 @@ class AIMatchingService:
             try:
                 # 计算详细匹配分数
                 detailed_scores = self._calculate_detailed_match_scores(
-                    project, engineer_info, "engineer_to_project"
+                    project, engineer_info
                 )
 
                 # 计算综合匹配分数
@@ -1217,16 +1235,17 @@ class AIMatchingService:
                         confidence_score=round(
                             similarity_score * 0.8 + final_score * 0.2, 3
                         ),
+                        # 只保留3个核心分数
                         skill_match_score=detailed_scores.get("skill_match"),
                         experience_match_score=detailed_scores.get("experience_match"),
-                        project_experience_match_score=detailed_scores.get(
-                            "project_experience_match"
-                        ),
                         japanese_level_match_score=detailed_scores.get(
                             "japanese_level_match"
                         ),
-                        budget_match_score=detailed_scores.get("budget_match"),
-                        location_match_score=detailed_scores.get("location_match"),
+                        # 其他分数设为None
+                        project_experience_match_score=None,
+                        budget_match_score=None,
+                        location_match_score=None,
+                        # 简化的匹配详情
                         matched_skills=detailed_scores.get("matched_skills", []),
                         missing_skills=detailed_scores.get("missing_skills", []),
                         matched_experiences=detailed_scores.get(
@@ -1235,12 +1254,9 @@ class AIMatchingService:
                         missing_experiences=detailed_scores.get(
                             "missing_experiences", []
                         ),
-                        project_experience_match=detailed_scores.get(
-                            "project_experience_match_list", []
-                        ),
-                        missing_project_experience=detailed_scores.get(
-                            "missing_project_experience", []
-                        ),
+                        # 清空不需要的字段
+                        project_experience_match=[],
+                        missing_project_experience=[],
                         match_reasons=reasons,
                         concerns=concerns,
                         project_title=project.get("title"),
@@ -1316,14 +1332,6 @@ class AIMatchingService:
         skill_issues = sum(1 for m in matches if len(m.missing_skills) > 2)
         if skill_issues > total_count * 0.5:
             recommendations.append("技能不匹配是主要问题，建议重新评估技能要求")
-
-        location_issues = sum(
-            1
-            for m in matches
-            if m.location_match_score and m.location_match_score < 0.5
-        )
-        if location_issues > total_count * 0.3:
-            recommendations.append("地点限制影响了匹配结果，建议考虑远程工作")
 
         return recommendations
 
@@ -1408,32 +1416,22 @@ class AIMatchingService:
                         if data["experience_match_score"]
                         else None
                     ),
-                    project_experience_match_score=(
-                        float(data["project_experience_match_score"])
-                        if data["project_experience_match_score"]
-                        else None
-                    ),
                     japanese_level_match_score=(
                         float(data["japanese_level_match_score"])
                         if data["japanese_level_match_score"]
                         else None
                     ),
-                    budget_match_score=(
-                        float(data["budget_match_score"])
-                        if data["budget_match_score"]
-                        else None
-                    ),
-                    location_match_score=(
-                        float(data["location_match_score"])
-                        if data["location_match_score"]
-                        else None
-                    ),
+                    # 其他分数设为None（数据库中可能还有旧数据）
+                    project_experience_match_score=None,
+                    budget_match_score=None,
+                    location_match_score=None,
                     matched_skills=data["matched_skills"] or [],
                     missing_skills=data["missing_skills"] or [],
                     matched_experiences=data["matched_experiences"] or [],
                     missing_experiences=data["missing_experiences"] or [],
-                    project_experience_match=data["project_experience_match"] or [],
-                    missing_project_experience=data["missing_project_experience"] or [],
+                    # 清空不需要的字段
+                    project_experience_match=[],
+                    missing_project_experience=[],
                     match_reasons=data["match_reasons"] or [],
                     concerns=data["concerns"] or [],
                     project_title=data["project_title"],
