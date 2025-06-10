@@ -1,618 +1,637 @@
 #!/usr/bin/env python3
-# fixed_embedding_matching_debugger.py - 修复pgvector兼容性问题
+# embedding_matching_debugger_vector_fixed.py - 修复vector数据类型问题
 import asyncio
 import sys
 from pathlib import Path
 import numpy as np
 import json
+import re
+from typing import List, Tuple, Dict, Any
 
 # 添加项目根目录到Python路径
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
 from app.database import fetch_one, fetch_all
-from app.services.ai_matching_service import AIMatchingService
-from app.schemas.ai_matching_schemas import ProjectToEngineersMatchRequest
-from uuid import UUID
 
 
-class FixedEmbeddingMatchingDebugger:
-    """修复版：诊断相同embedding无法匹配的问题"""
+class VectorFixedEmbeddingDebugger:
+    """修复版：解决vector数据类型转换问题"""
 
     def __init__(self):
         self.tenant_id = "33723dd6-cf28-4dab-975c-f883f5389d04"
-        self.matching_service = AIMatchingService()
 
-    async def check_pgvector_setup(self):
-        """检查pgvector扩展和设置"""
-        print("🔍 检查pgvector扩展...")
-
+    def _parse_vector_string(self, vector_str: str) -> np.ndarray:
+        """将PostgreSQL vector字符串转换为numpy数组"""
         try:
-            # 检查pgvector扩展
-            extension_check = await fetch_one(
-                """
-                SELECT * FROM pg_extension WHERE extname = 'vector'
-            """
-            )
+            if not vector_str:
+                return np.array([])
 
-            if extension_check:
-                print("✅ pgvector扩展已安装")
+            # 处理PostgreSQL vector格式：'[1,2,3]' 或 '[1.0, 2.0, 3.0]'
+            if isinstance(vector_str, str):
+                # 移除外层的方括号
+                vector_str = vector_str.strip()
+                if vector_str.startswith("[") and vector_str.endswith("]"):
+                    vector_str = vector_str[1:-1]
+
+                # 分割并转换为浮点数
+                if vector_str:
+                    values = [
+                        float(x.strip()) for x in vector_str.split(",") if x.strip()
+                    ]
+                    return np.array(values, dtype=np.float32)
+                else:
+                    return np.array([])
+            elif isinstance(vector_str, (list, tuple)):
+                # 如果已经是列表或元组
+                return np.array(vector_str, dtype=np.float32)
             else:
-                print("❌ pgvector扩展未安装")
-                return False
-
-            # 检查vector相关函数
-            functions_check = await fetch_all(
-                """
-                SELECT proname FROM pg_proc 
-                WHERE proname IN ('vector_dims', 'cosine_distance', 'inner_product')
-            """
-            )
-
-            available_functions = [f["proname"] for f in functions_check]
-            print(f"可用函数: {available_functions}")
-
-            # 测试vector操作
-            test_result = await fetch_one(
-                """
-                SELECT '[1,2,3]'::vector as test_vector
-            """
-            )
-
-            if test_result:
-                print("✅ vector类型工作正常")
-
-            return True
+                print(f"未知的vector数据类型: {type(vector_str)}")
+                return np.array([])
 
         except Exception as e:
-            print(f"❌ pgvector检查失败: {str(e)}")
-            return False
+            print(f"解析vector失败: {str(e)}, 数据: {str(vector_str)[:100]}...")
+            return np.array([])
 
-    async def check_database_consistency_fixed(self):
-        """修复版：检查数据库一致性（兼容pgvector）"""
-        print("\n🔍 检查数据库一致性")
-        print("=" * 60)
-
-        try:
-            # 修复版项目统计（兼容vector类型）
-            project_stats = await fetch_one(
-                """
-                SELECT 
-                    COUNT(*) as total,
-                    COUNT(ai_match_embedding) as with_embedding,
-                    -- 使用vector_dims函数获取向量维度
-                    (SELECT vector_dims(ai_match_embedding) 
-                     FROM projects 
-                     WHERE tenant_id = $1 AND ai_match_embedding IS NOT NULL 
-                     LIMIT 1) as embedding_dims
-                FROM projects 
-                WHERE tenant_id = $1 AND is_active = true
-            """,
-                self.tenant_id,
-            )
-
-            # 修复版简历统计
-            engineer_stats = await fetch_one(
-                """
-                SELECT 
-                    COUNT(*) as total,
-                    COUNT(ai_match_embedding) as with_embedding,
-                    -- 使用vector_dims函数获取向量维度
-                    (SELECT vector_dims(ai_match_embedding) 
-                     FROM engineers 
-                     WHERE tenant_id = $1 AND ai_match_embedding IS NOT NULL 
-                     LIMIT 1) as embedding_dims
-                FROM engineers 
-                WHERE tenant_id = $1 AND is_active = true
-            """,
-                self.tenant_id,
-            )
-
-            print(f"项目统计:")
-            print(f"  总数: {project_stats['total']}")
-            print(f"  有embedding: {project_stats['with_embedding']}")
-            print(f"  embedding维度: {project_stats['embedding_dims']}")
-
-            print(f"\n简历统计:")
-            print(f"  总数: {engineer_stats['total']}")
-            print(f"  有embedding: {engineer_stats['with_embedding']}")
-            print(f"  embedding维度: {engineer_stats['embedding_dims']}")
-
-            # 检查匹配历史
-            match_history = await fetch_one(
-                """
-                SELECT 
-                    COUNT(*) as total_history,
-                    COUNT(CASE WHEN execution_status = 'completed' THEN 1 END) as completed,
-                    COUNT(CASE WHEN execution_status = 'failed' THEN 1 END) as failed
-                FROM ai_matching_history 
-                WHERE tenant_id = $1
-            """,
-                self.tenant_id,
-            )
-
-            print(f"\n匹配历史:")
-            print(f"  总历史记录: {match_history['total_history']}")
-            print(f"  成功完成: {match_history['completed']}")
-            print(f"  失败: {match_history['failed']}")
-
-            # 检查已保存的匹配
-            saved_matches = await fetch_one(
-                """
-                SELECT 
-                    COUNT(*) as total_matches,
-                    AVG(match_score) as avg_score,
-                    COUNT(CASE WHEN match_score >= 0.8 THEN 1 END) as high_quality
-                FROM project_engineer_matches 
-                WHERE tenant_id = $1 AND is_active = true
-            """,
-                self.tenant_id,
-            )
-
-            print(f"\n已保存匹配:")
-            print(f"  总匹配数: {saved_matches['total_matches']}")
-            print(
-                f"  平均分数: {saved_matches['avg_score']:.4f}"
-                if saved_matches["avg_score"]
-                else "  平均分数: 0"
-            )
-            print(f"  高质量匹配: {saved_matches['high_quality']}")
-
-            return True
-
-        except Exception as e:
-            print(f"❌ 数据库一致性检查失败: {str(e)}")
-            import traceback
-
-            print(f"详细错误:\n{traceback.format_exc()}")
-            return False
-
-    async def find_similar_embeddings_fixed(self):
-        """修复版：查找相似的embedding（使用pgvector查询）"""
-        print("\n🔍 查找相似的embedding...")
+    async def check_vector_data_format(self):
+        """检查vector数据格式"""
+        print("🔍 检查vector数据格式...")
 
         try:
-            # 获取一个测试项目
-            test_project = await fetch_one(
+            # 检查项目的embedding数据
+            project = await fetch_one(
                 """
-                SELECT id, title, ai_match_embedding, skills, experience, japanese_level
+                SELECT id, title, ai_match_embedding
                 FROM projects 
                 WHERE tenant_id = $1 AND is_active = true AND ai_match_embedding IS NOT NULL
                 ORDER BY created_at DESC LIMIT 1
-            """,
+                """,
                 self.tenant_id,
             )
 
-            if not test_project:
-                print("❌ 没有找到测试项目")
-                return []
-
-            print(f"测试项目: {test_project['title']}")
-
-            # 使用pgvector查找最相似的简历
-            similar_engineers = await fetch_all(
+            engineer = await fetch_one(
                 """
-                SELECT 
-                    id, name, ai_match_embedding,
-                    skills, experience, japanese_level,
-                    ai_match_embedding <#> $1 as cosine_distance,
-                    1 - (ai_match_embedding <#> $1) as cosine_similarity
+                SELECT id, name, ai_match_embedding
                 FROM engineers 
-                WHERE tenant_id = $2 AND is_active = true AND ai_match_embedding IS NOT NULL
-                ORDER BY ai_match_embedding <#> $1 ASC
-                LIMIT 10
-            """,
-                test_project["ai_match_embedding"],
+                WHERE tenant_id = $1 AND is_active = true AND ai_match_embedding IS NOT NULL
+                ORDER BY created_at DESC LIMIT 1
+                """,
                 self.tenant_id,
             )
 
-            print(f"找到 {len(similar_engineers)} 个相似简历")
+            if not project or not engineer:
+                print("❌ 没有找到测试数据")
+                return False
 
-            # 分析前3个最相似的
-            for i, engineer in enumerate(similar_engineers[:3]):
-                similarity = engineer["cosine_similarity"]
-                distance = engineer["cosine_distance"]
+            print(f"✅ 找到测试数据:")
+            print(f"   项目: {project['title']}")
+            print(f"   简历: {engineer['name']}")
 
-                print(f"\n=== 相似简历 {i+1} ===")
-                print(f"简历: {engineer['name']}")
-                print(f"余弦距离: {distance:.6f}")
-                print(f"余弦相似度: {similarity:.6f}")
-                print(f"项目技能: {test_project['skills']}")
-                print(f"简历技能: {engineer['skills']}")
-                print(f"项目经验: {test_project['experience']}")
-                print(f"简历经验: {engineer['experience']}")
-                print(f"项目日语: {test_project['japanese_level']}")
-                print(f"简历日语: {engineer['japanese_level']}")
+            # 分析embedding数据类型和格式
+            project_emb_raw = project["ai_match_embedding"]
+            engineer_emb_raw = engineer["ai_match_embedding"]
 
-                # 测试这对数据的匹配情况
-                await self.debug_specific_pair_fixed(test_project, engineer)
+            print(f"\n📊 原始数据类型分析:")
+            print(f"   项目embedding类型: {type(project_emb_raw)}")
+            print(f"   简历embedding类型: {type(engineer_emb_raw)}")
 
-            return similar_engineers
-
-        except Exception as e:
-            print(f"❌ 查找相似embedding失败: {str(e)}")
-            import traceback
-
-            print(f"详细错误:\n{traceback.format_exc()}")
-            return []
-
-    async def debug_specific_pair_fixed(self, project, engineer):
-        """修复版：调试特定的项目-简历对"""
-        print(f"\n🔍 调试匹配过程:")
-
-        try:
-            # 1. 验证pgvector相似度计算
-            print("1. 验证pgvector相似度计算...")
-
-            pgvector_result = await fetch_one(
-                """
-                SELECT 
-                    ai_match_embedding <#> $1 as distance,
-                    1 - (ai_match_embedding <#> $1) as similarity
-                FROM engineers 
-                WHERE id = $2
-            """,
-                project["ai_match_embedding"],
-                engineer["id"],
-            )
-
-            if pgvector_result:
-                distance = pgvector_result["distance"]
-                similarity = pgvector_result["similarity"]
-                print(f"   pgvector距离: {distance:.6f}")
-                print(f"   pgvector相似度: {similarity:.6f}")
+            if isinstance(project_emb_raw, str):
+                print(f"   项目embedding长度: {len(project_emb_raw)} 字符")
+                print(f"   项目embedding预览: {project_emb_raw[:100]}...")
             else:
-                print("   ❌ pgvector查询失败")
-                return
-
-            # 2. 测试详细分数计算
-            print("2. 测试详细分数计算...")
-            detailed_scores = self.matching_service._calculate_detailed_match_scores(
-                project, engineer
-            )
-
-            for key, value in detailed_scores.items():
-                if isinstance(value, (int, float)):
-                    print(f"   {key}: {value:.4f}")
-                else:
-                    print(f"   {key}: {value}")
-
-            # 3. 测试权重分数计算
-            print("3. 测试权重分数计算...")
-            weights = {
-                "skill_match": 0.5,
-                "experience_match": 0.3,
-                "japanese_level_match": 0.2,
-            }
-
-            final_score = self.matching_service._calculate_weighted_score(
-                detailed_scores, weights, similarity
-            )
-
-            print(f"   语义相似度: {similarity:.4f}")
-            print(f"   最终分数: {final_score:.4f}")
-
-            # 4. 分析为什么可能匹配不上
-            print("4. 匹配失败原因分析...")
-
-            # 计算每个维度对最终分数的贡献
-            skill_contribution = (
-                detailed_scores.get("skill_match", 0) * weights["skill_match"]
-            )
-            exp_contribution = (
-                detailed_scores.get("experience_match", 0) * weights["experience_match"]
-            )
-            jp_contribution = (
-                detailed_scores.get("japanese_level_match", 0)
-                * weights["japanese_level_match"]
-            )
-
-            base_score = skill_contribution + exp_contribution + jp_contribution
-            semantic_contribution = similarity * 0.3
-            structural_contribution = base_score * 0.7
-
-            print(
-                f"   技能贡献: {skill_contribution:.4f} (权重{weights['skill_match']})"
-            )
-            print(
-                f"   经验贡献: {exp_contribution:.4f} (权重{weights['experience_match']})"
-            )
-            print(
-                f"   日语贡献: {jp_contribution:.4f} (权重{weights['japanese_level_match']})"
-            )
-            print(f"   结构化总分: {base_score:.4f}")
-            print(f"   语义贡献: {semantic_contribution:.4f} (权重0.3)")
-            print(f"   结构化贡献: {structural_contribution:.4f} (权重0.7)")
-            print(f"   最终分数: {semantic_contribution + structural_contribution:.4f}")
-
-            # 判断是否会被过滤
-            common_thresholds = [0.0, 0.1, 0.3, 0.5, 0.6, 0.7, 0.8]
-            print(f"   不同门槛下是否通过:")
-            for threshold in common_thresholds:
-                passed = final_score >= threshold
-                status = "✅" if passed else "❌"
-                print(f"     门槛{threshold}: {status}")
-
-        except Exception as e:
-            print(f"❌ 调试过程出错: {str(e)}")
-            import traceback
-
-            print(f"详细错误:\n{traceback.format_exc()}")
-
-    async def test_direct_matching_fixed(self):
-        """修复版：直接测试匹配功能"""
-        print("\n🎯 直接测试匹配功能")
-        print("=" * 60)
-
-        # 获取测试数据
-        project = await fetch_one(
-            """
-            SELECT * FROM projects 
-            WHERE tenant_id = $1 AND is_active = true AND ai_match_embedding IS NOT NULL
-            ORDER BY created_at DESC LIMIT 1
-        """,
-            self.tenant_id,
-        )
-
-        if not project:
-            print("❌ 没有找到测试项目")
-            return
-
-        print(f"测试项目: {project['title']}")
-
-        # 测试不同的配置
-        test_configs = [
-            {
-                "name": "零门槛测试",
-                "min_score": 0.0,
-                "weights": {
-                    "skill_match": 0.5,
-                    "experience_match": 0.3,
-                    "japanese_level_match": 0.2,
-                },
-            },
-            {
-                "name": "语义优先测试",
-                "min_score": 0.1,
-                "weights": {
-                    "skill_match": 0.1,
-                    "experience_match": 0.1,
-                    "japanese_level_match": 0.05,
-                },
-            },
-            {
-                "name": "标准配置测试",
-                "min_score": 0.6,
-                "weights": {
-                    "skill_match": 0.5,
-                    "experience_match": 0.3,
-                    "japanese_level_match": 0.2,
-                },
-            },
-        ]
-
-        for config in test_configs:
-            print(f"\n🧪 {config['name']}:")
-            print(f"   最小分数: {config['min_score']}")
-            print(f"   权重配置: {config['weights']}")
-
-            try:
-                # 创建匹配请求
-                request = ProjectToEngineersMatchRequest(
-                    tenant_id=UUID(self.tenant_id),
-                    project_id=project["id"],
-                    max_matches=10,
-                    min_score=config["min_score"],
-                    executed_by=None,
-                    matching_type="project_to_engineers",
-                    trigger_type="api",
-                    weights=config["weights"],
-                    filters={},
+                print(
+                    f"   项目embedding长度: {len(project_emb_raw) if hasattr(project_emb_raw, '__len__') else 'Unknown'}"
                 )
 
-                result = await self.matching_service.match_project_to_engineers(request)
+            # 尝试转换为numpy数组
+            print(f"\n🔄 转换为numpy数组:")
 
-                print(f"   ✅ 匹配完成:")
-                print(f"   总匹配数: {result.total_matches}")
-                print(f"   高质量匹配: {result.high_quality_matches}")
-                print(f"   处理时间: {result.processing_time_seconds}秒")
+            project_emb = self._parse_vector_string(project_emb_raw)
+            engineer_emb = self._parse_vector_string(engineer_emb_raw)
 
-                if result.matches:
-                    print(f"   前3个匹配结果:")
-                    for i, match in enumerate(result.matches[:3], 1):
-                        print(f"   {i}. {match.engineer_name}: {match.match_score:.4f}")
-                        print(f"      技能: {match.skill_match_score:.4f}")
-                        print(f"      经验: {match.experience_match_score:.4f}")
-                        print(f"      日语: {match.japanese_level_match_score:.4f}")
+            if project_emb.size == 0 or engineer_emb.size == 0:
+                print("❌ vector转换失败")
+                return False
+
+            print(
+                f"   项目embedding数组: 形状={project_emb.shape}, 类型={project_emb.dtype}"
+            )
+            print(
+                f"   简历embedding数组: 形状={engineer_emb.shape}, 类型={engineer_emb.dtype}"
+            )
+            print(
+                f"   项目向量范围: [{project_emb.min():.4f}, {project_emb.max():.4f}]"
+            )
+            print(
+                f"   简历向量范围: [{engineer_emb.min():.4f}, {engineer_emb.max():.4f}]"
+            )
+
+            # 测试数学运算
+            print(f"\n🧮 测试数学运算:")
+            try:
+                dot_product = np.dot(project_emb, engineer_emb)
+                project_norm = np.linalg.norm(project_emb)
+                engineer_norm = np.linalg.norm(engineer_emb)
+
+                if project_norm > 0 and engineer_norm > 0:
+                    cosine_similarity = dot_product / (project_norm * engineer_norm)
+                    print(f"   ✅ 点积计算成功: {dot_product:.6f}")
+                    print(
+                        f"   ✅ 向量模长: 项目={project_norm:.6f}, 简历={engineer_norm:.6f}"
+                    )
+                    print(f"   ✅ 余弦相似度: {cosine_similarity:.6f}")
+
+                    # 转换为[0,1]范围
+                    normalized_similarity = (cosine_similarity + 1) / 2
+                    print(f"   ✅ 标准化相似度: {normalized_similarity:.6f}")
+
+                    return True
                 else:
-                    print("   ❌ 没有找到任何匹配")
+                    print("   ❌ 向量模长为0，无法计算相似度")
+                    return False
 
             except Exception as e:
-                print(f"   ❌ 测试失败: {str(e)}")
-
-    async def generate_api_test_commands(self):
-        """生成API测试命令"""
-        print("\n📋 生成API测试命令")
-        print("=" * 60)
-
-        # 获取测试项目ID
-        project = await fetch_one(
-            """
-            SELECT id, title FROM projects 
-            WHERE tenant_id = $1 AND is_active = true AND ai_match_embedding IS NOT NULL
-            ORDER BY created_at DESC LIMIT 1
-        """,
-            self.tenant_id,
-        )
-
-        if not project:
-            print("❌ 没有找到测试项目")
-            return
-
-        project_id = str(project["id"])
-        print(f"测试项目: {project['title']} ({project_id})")
-
-        # 零门槛配置
-        zero_threshold_config = {
-            "tenant_id": self.tenant_id,
-            "project_id": project_id,
-            "max_matches": 20,
-            "min_score": 0.0,
-            "executed_by": None,
-            "matching_type": "project_to_engineers",
-            "trigger_type": "api_test",
-            "weights": {
-                "skill_match": 0.5,
-                "experience_match": 0.3,
-                "japanese_level_match": 0.2,
-            },
-            "filters": {},
-        }
-
-        # 语义优先配置
-        semantic_first_config = {
-            "tenant_id": self.tenant_id,
-            "project_id": project_id,
-            "max_matches": 20,
-            "min_score": 0.0,
-            "executed_by": None,
-            "matching_type": "project_to_engineers",
-            "trigger_type": "api_test",
-            "weights": {
-                "skill_match": 0.1,
-                "experience_match": 0.1,
-                "japanese_level_match": 0.05,
-            },
-            "filters": {},
-        }
-
-        import json
-
-        print(f"\n1. 零门槛测试 (curl):")
-        print(
-            f"curl -X POST 'http://localhost:8000/api/v1/ai-matching/project-to-engineers' \\"
-        )
-        print(f"     -H 'Content-Type: application/json' \\")
-        print(f"     -d '{json.dumps(zero_threshold_config)}'")
-
-        print(f"\n2. 语义优先测试 (curl):")
-        print(
-            f"curl -X POST 'http://localhost:8000/api/v1/ai-matching/project-to-engineers' \\"
-        )
-        print(f"     -H 'Content-Type: application/json' \\")
-        print(f"     -d '{json.dumps(semantic_first_config)}'")
-
-        print(f"\n3. Python requests测试:")
-        python_code = f"""
-import requests
-import json
-
-# 零门槛配置
-config = {json.dumps(zero_threshold_config, indent=4)}
-
-response = requests.post(
-    "http://localhost:8000/api/v1/ai-matching/project-to-engineers",
-    json=config
-)
-
-print(f"状态码: {{response.status_code}}")
-if response.status_code == 200:
-    result = response.json()
-    print(f"匹配数: {{result.get('total_matches', 0)}}")
-    if result.get('matches'):
-        print("前5个匹配:")
-        for i, match in enumerate(result['matches'][:5], 1):
-            print(f"{{i}}. {{match['engineer_name']}}: {{match['match_score']:.4f}}")
-else:
-    print(f"错误: {{response.text}}")
-"""
-        print(python_code)
-
-    async def run_full_diagnosis_fixed(self):
-        """运行完整诊断（修复版）"""
-        print("🏥 AI匹配问题诊断工具 (修复版)")
-        print("=" * 80)
-
-        try:
-            # 1. 检查pgvector设置
-            pgvector_ok = await self.check_pgvector_setup()
-            if not pgvector_ok:
-                print("❌ pgvector设置有问题，请检查数据库配置")
-                return
-
-            # 2. 检查数据库一致性
-            db_ok = await self.check_database_consistency_fixed()
-            if not db_ok:
-                print("❌ 数据库一致性检查失败")
-                return
-
-            # 3. 查找相似embedding
-            similar_pairs = await self.find_similar_embeddings_fixed()
-
-            # 4. 直接测试匹配
-            await self.test_direct_matching_fixed()
-
-            # 5. 生成API测试命令
-            await self.generate_api_test_commands()
-
-            # 6. 生成诊断报告
-            self.generate_diagnosis_report_fixed(similar_pairs)
+                print(f"   ❌ 数学运算失败: {str(e)}")
+                return False
 
         except Exception as e:
-            print(f"❌ 诊断过程出错: {str(e)}")
+            print(f"❌ 检查vector数据格式失败: {str(e)}")
+            import traceback
+
+            print(f"详细错误:\n{traceback.format_exc()}")
+            return False
+
+    async def test_pgvector_operators_fixed(self):
+        """测试修复版pgvector操作符"""
+        print("\n🧮 测试修复版pgvector操作符...")
+
+        try:
+            # 获取测试数据
+            project = await fetch_one(
+                "SELECT * FROM projects WHERE tenant_id = $1 AND ai_match_embedding IS NOT NULL LIMIT 1",
+                self.tenant_id,
+            )
+
+            engineer = await fetch_one(
+                "SELECT * FROM engineers WHERE tenant_id = $1 AND ai_match_embedding IS NOT NULL LIMIT 1",
+                self.tenant_id,
+            )
+
+            if not project or not engineer:
+                print("❌ 没有测试数据")
+                return
+
+            print(f"测试对象: {project['title']} vs {engineer['name']}")
+
+            # 手动计算作为基准
+            project_emb = self._parse_vector_string(project["ai_match_embedding"])
+            engineer_emb = self._parse_vector_string(engineer["ai_match_embedding"])
+
+            if project_emb.size == 0 or engineer_emb.size == 0:
+                print("❌ vector解析失败")
+                return
+
+            manual_dot = np.dot(project_emb, engineer_emb)
+            manual_norm_p = np.linalg.norm(project_emb)
+            manual_norm_e = np.linalg.norm(engineer_emb)
+            manual_cosine = manual_dot / (manual_norm_p * manual_norm_e)
+
+            print(f"\n📊 手动计算基准:")
+            print(f"   点积: {manual_dot:.6f}")
+            print(f"   余弦相似度: {manual_cosine:.6f}")
+            print(f"   标准化相似度: {(manual_cosine + 1) / 2:.6f}")
+
+            # 测试各种pgvector操作符
+            operators = [
+                ("<=>", "余弦距离"),
+                ("<#>", "负内积"),
+                ("<->", "欧几里得距离"),
+            ]
+
+            print(f"\n🔬 pgvector操作符测试:")
+            for op, desc in operators:
+                try:
+                    result = await fetch_one(
+                        f"SELECT ai_match_embedding {op} $1 as result FROM engineers WHERE id = $2",
+                        project["ai_match_embedding"],
+                        engineer["id"],
+                    )
+
+                    if result:
+                        value = result["result"]
+                        print(f"   {op} ({desc}): {value:.6f}")
+
+                        # 如果是余弦距离，计算相似度
+                        if op == "<=>":
+                            similarity = 1 - value
+                            print(f"      → 余弦相似度: {similarity:.6f}")
+                            print(
+                                f"      → 与手动计算差异: {abs(similarity - manual_cosine):.6f}"
+                            )
+
+                        # 如果是负内积，计算实际内积
+                        elif op == "<#>":
+                            actual_dot = -value
+                            print(f"      → 实际内积: {actual_dot:.6f}")
+                            print(
+                                f"      → 与手动计算差异: {abs(actual_dot - manual_dot):.6f}"
+                            )
+
+                except Exception as e:
+                    print(f"   {op}: 操作失败 - {str(e)}")
+
+        except Exception as e:
+            print(f"❌ pgvector操作符测试失败: {str(e)}")
+
+    async def test_corrected_similarity_calculation(self):
+        """测试修正的相似度计算"""
+        print("\n🎯 测试修正的相似度计算...")
+
+        try:
+            # 获取测试数据
+            project = await fetch_one(
+                "SELECT * FROM projects WHERE tenant_id = $1 AND ai_match_embedding IS NOT NULL LIMIT 1",
+                self.tenant_id,
+            )
+
+            engineers = await fetch_all(
+                "SELECT * FROM engineers WHERE tenant_id = $1 AND ai_match_embedding IS NOT NULL LIMIT 3",
+                self.tenant_id,
+            )
+
+            if not project or not engineers:
+                print("❌ 缺少测试数据")
+                return
+
+            print(f"测试项目: {project['title']}")
+            print(f"测试简历数: {len(engineers)}")
+
+            # 方法1：使用pgvector余弦距离
+            print(f"\n🔬 方法1: pgvector余弦距离")
+            try:
+                pgvector_results = await fetch_all(
+                    """
+                    SELECT id, name, ai_match_embedding <=> $1 as cosine_distance
+                    FROM engineers 
+                    WHERE tenant_id = $2 AND ai_match_embedding IS NOT NULL
+                    ORDER BY ai_match_embedding <=> $1 ASC
+                    LIMIT 3
+                    """,
+                    project["ai_match_embedding"],
+                    self.tenant_id,
+                )
+
+                for result in pgvector_results:
+                    distance = result["cosine_distance"]
+                    similarity = 1 - distance
+                    # 确保在[0,1]范围内
+                    similarity = max(0, min(1, similarity))
+                    print(
+                        f"   {result['name']}: 距离={distance:.6f}, 相似度={similarity:.6f}"
+                    )
+
+            except Exception as e:
+                print(f"   pgvector方法失败: {str(e)}")
+
+            # 方法2：手动计算
+            print(f"\n🔬 方法2: 手动计算")
+            project_emb = self._parse_vector_string(project["ai_match_embedding"])
+
+            if project_emb.size > 0:
+                for engineer in engineers:
+                    engineer_emb = self._parse_vector_string(
+                        engineer["ai_match_embedding"]
+                    )
+
+                    if engineer_emb.size > 0:
+                        # 计算余弦相似度
+                        dot_product = np.dot(project_emb, engineer_emb)
+                        norm_p = np.linalg.norm(project_emb)
+                        norm_e = np.linalg.norm(engineer_emb)
+
+                        if norm_p > 0 and norm_e > 0:
+                            cosine_sim = dot_product / (norm_p * norm_e)
+                            # 转换到[0,1]范围
+                            normalized_sim = (cosine_sim + 1) / 2
+                            print(
+                                f"   {engineer['name']}: 原始={cosine_sim:.6f}, 标准化={normalized_sim:.6f}"
+                            )
+
+            # 方法3：推荐的实现
+            print(f"\n🎯 推荐实现:")
+            recommended_results = await self._calculate_similarities_recommended(
+                project["ai_match_embedding"], engineers
+            )
+
+            for engineer, similarity in recommended_results:
+                print(f"   {engineer['name']}: 相似度={similarity:.6f}")
+
+        except Exception as e:
+            print(f"❌ 相似度计算测试失败: {str(e)}")
             import traceback
 
             print(f"详细错误:\n{traceback.format_exc()}")
 
-    def generate_diagnosis_report_fixed(self, similar_pairs):
-        """生成诊断报告（修复版）"""
-        print("\n" + "=" * 80)
-        print("📊 诊断报告")
+    async def _calculate_similarities_recommended(
+        self, target_embedding, candidates
+    ) -> List[Tuple[Dict[str, Any], float]]:
+        """推荐的相似度计算方法"""
+        results = []
+
+        try:
+            # 方法1: 尝试pgvector余弦距离
+            candidate_ids = [c["id"] for c in candidates]
+
+            pgvector_results = await fetch_all(
+                """
+                SELECT id, ai_match_embedding <=> $1 as cosine_distance
+                FROM engineers 
+                WHERE id = ANY($2) AND ai_match_embedding IS NOT NULL
+                ORDER BY ai_match_embedding <=> $1 ASC
+                """,
+                target_embedding,
+                candidate_ids,
+            )
+
+            # 创建ID到相似度的映射
+            similarity_map = {}
+            for result in pgvector_results:
+                distance = result["cosine_distance"]
+                if distance is not None:
+                    # 转换为相似度并确保在[0,1]范围内
+                    similarity = 1 - distance
+                    similarity = max(0, min(1, similarity))
+                    similarity_map[result["id"]] = similarity
+
+            # 组合结果
+            for candidate in candidates:
+                if candidate["id"] in similarity_map:
+                    similarity = similarity_map[candidate["id"]]
+                    results.append((candidate, similarity))
+
+        except Exception as e:
+            print(f"pgvector方法失败，使用手动计算: {str(e)}")
+
+            # 方法2: 手动计算作为备选
+            target_emb = self._parse_vector_string(target_embedding)
+
+            if target_emb.size > 0:
+                for candidate in candidates:
+                    candidate_emb = self._parse_vector_string(
+                        candidate["ai_match_embedding"]
+                    )
+
+                    if candidate_emb.size > 0:
+                        try:
+                            # 计算余弦相似度
+                            dot_product = np.dot(target_emb, candidate_emb)
+                            norm_t = np.linalg.norm(target_emb)
+                            norm_c = np.linalg.norm(candidate_emb)
+
+                            if norm_t > 0 and norm_c > 0:
+                                cosine_sim = dot_product / (norm_t * norm_c)
+                                # 转换到[0,1]范围
+                                normalized_sim = (cosine_sim + 1) / 2
+                                normalized_sim = max(0, min(1, normalized_sim))
+                                results.append((candidate, normalized_sim))
+
+                        except Exception as calc_error:
+                            print(
+                                f"计算相似度失败: {candidate['id']}, 错误: {str(calc_error)}"
+                            )
+                            continue
+
+        return results
+
+    async def clean_duplicate_matches(self):
+        """清理重复的匹配记录"""
+        print("\n🧹 清理重复匹配记录...")
+
+        try:
+            # 查询重复记录
+            duplicates = await fetch_all(
+                """
+                SELECT tenant_id, project_id, engineer_id, COUNT(*) as count
+                FROM project_engineer_matches 
+                WHERE tenant_id = $1
+                GROUP BY tenant_id, project_id, engineer_id
+                HAVING COUNT(*) > 1
+                """,
+                self.tenant_id,
+            )
+
+            if duplicates:
+                print(f"发现 {len(duplicates)} 组重复记录")
+
+                # 删除重复记录（保留最新的）
+                from app.database import execute_query
+
+                for dup in duplicates:
+                    await execute_query(
+                        """
+                        DELETE FROM project_engineer_matches 
+                        WHERE tenant_id = $1 AND project_id = $2 AND engineer_id = $3
+                        AND id NOT IN (
+                            SELECT id FROM project_engineer_matches 
+                            WHERE tenant_id = $1 AND project_id = $2 AND engineer_id = $3
+                            ORDER BY created_at DESC LIMIT 1
+                        )
+                        """,
+                        dup["tenant_id"],
+                        dup["project_id"],
+                        dup["engineer_id"],
+                    )
+
+                print("✅ 重复记录清理完成")
+            else:
+                print("✅ 没有发现重复记录")
+
+        except Exception as e:
+            print(f"❌ 清理重复记录失败: {str(e)}")
+
+    async def generate_code_fixes(self):
+        """生成代码修复建议"""
+        print("\n💻 生成代码修复建议")
+        print("=" * 60)
+
+        print("1. 📝 vector数据解析函数:")
+        print(
+            """
+def _parse_vector_string(self, vector_str) -> np.ndarray:
+    '''将PostgreSQL vector字符串转换为numpy数组'''
+    try:
+        if not vector_str:
+            return np.array([])
+        
+        if isinstance(vector_str, str):
+            # 移除外层方括号并分割
+            vector_str = vector_str.strip()
+            if vector_str.startswith('[') and vector_str.endswith(']'):
+                vector_str = vector_str[1:-1]
+            
+            if vector_str:
+                values = [float(x.strip()) for x in vector_str.split(',') if x.strip()]
+                return np.array(values, dtype=np.float32)
+            else:
+                return np.array([])
+        elif isinstance(vector_str, (list, tuple)):
+            return np.array(vector_str, dtype=np.float32)
+        else:
+            return np.array([])
+            
+    except Exception as e:
+        logger.error(f"解析vector失败: {str(e)}")
+        return np.array([])
+"""
+        )
+
+        print("\n2. 🔧 修复版相似度计算:")
+        print(
+            """
+async def _calculate_similarities_batch_fixed(self, target_embedding, candidates, table_type):
+    '''修复版批量相似度计算'''
+    if not candidates:
+        return []
+
+    candidate_ids = [c["id"] for c in candidates]
+    table_name = "engineers" if table_type == "engineers" else "projects"
+
+    try:
+        # 使用pgvector余弦距离
+        query = f'''
+        SELECT id, ai_match_embedding <=> $1 as cosine_distance
+        FROM {table_name}
+        WHERE id = ANY($2) AND ai_match_embedding IS NOT NULL
+        ORDER BY ai_match_embedding <=> $1 ASC
+        '''
+        
+        similarities = await fetch_all(query, target_embedding, candidate_ids)
+        
+        results = []
+        for s in similarities:
+            distance = s["cosine_distance"]
+            if distance is not None:
+                # 转换为相似度[0,1]
+                similarity = 1 - distance
+                similarity = max(0, min(1, similarity))
+                
+                # 找到对应的候选对象
+                candidate = next(c for c in candidates if c["id"] == s["id"])
+                results.append((candidate, similarity))
+        
+        return results
+        
+    except Exception as e:
+        logger.error(f"pgvector查询失败，使用手动计算: {str(e)}")
+        return await self._manual_similarity_calculation(target_embedding, candidates)
+"""
+        )
+
+        print("\n3. 🔧 手动计算备选方案:")
+        print(
+            """
+async def _manual_similarity_calculation(self, target_embedding, candidates):
+    '''手动相似度计算备选方案'''
+    results = []
+    target_emb = self._parse_vector_string(target_embedding)
+    
+    if target_emb.size == 0:
+        return results
+    
+    for candidate in candidates:
+        try:
+            candidate_emb = self._parse_vector_string(candidate["ai_match_embedding"])
+            
+            if candidate_emb.size > 0:
+                # 计算余弦相似度
+                dot_product = np.dot(target_emb, candidate_emb)
+                norm_t = np.linalg.norm(target_emb)
+                norm_c = np.linalg.norm(candidate_emb)
+                
+                if norm_t > 0 and norm_c > 0:
+                    cosine_sim = dot_product / (norm_t * norm_c)
+                    # 转换到[0,1]范围
+                    normalized_sim = (cosine_sim + 1) / 2
+                    normalized_sim = max(0, min(1, normalized_sim))
+                    results.append((candidate, normalized_sim))
+                    
+        except Exception as e:
+            logger.error(f"计算相似度失败: {candidate['id']}, 错误: {str(e)}")
+            continue
+    
+    # 按相似度排序
+    results.sort(key=lambda x: x[1], reverse=True)
+    return results
+"""
+        )
+
+        print("\n4. 🛡️ 分数验证函数:")
+        print(
+            """
+def _validate_similarity_score(self, score: float, context: str = "") -> float:
+    '''验证和修正相似度分数'''
+    if score is None or not isinstance(score, (int, float)):
+        logger.warning(f"无效相似度分数 {context}: {score}")
+        return 0.5
+        
+    if not (0 <= score <= 1):
+        logger.warning(f"相似度分数超出范围 {context}: {score}")
+        # 修正异常值
+        if score > 1:
+            score = 1.0
+        elif score < 0:
+            score = 0.0
+            
+    return float(score)
+"""
+        )
+
+    async def run_complete_vector_fix_diagnosis(self):
+        """运行完整的vector修复诊断"""
+        print("🛠️ Vector数据类型修复诊断")
         print("=" * 80)
 
-        print(f"🔍 发现 {len(similar_pairs)} 个相似简历")
+        try:
+            # 1. 检查vector数据格式
+            format_ok = await self.check_vector_data_format()
 
-        if similar_pairs:
-            high_similarity_count = len(
-                [p for p in similar_pairs if p["cosine_similarity"] > 0.9]
-            )
-            print(f"🎯 高相似度 (>0.9): {high_similarity_count} 个")
+            if not format_ok:
+                print("❌ Vector数据格式有问题，无法继续")
+                return
 
-            print("\n🔍 问题诊断:")
-            print("1. ✅ pgvector扩展工作正常")
-            print("2. ✅ embedding数据存在")
-            print("3. ✅ 相似度计算正常")
+            # 2. 测试pgvector操作符
+            await self.test_pgvector_operators_fixed()
 
-            if high_similarity_count > 0:
-                print("4. ⚠️  有高相似度数据但可能匹配失败")
-                print("   原因分析:")
-                print("   - 结构化匹配分数低（技能、经验、日语）")
-                print("   - 权重分配：70%结构化 + 30%语义")
-                print("   - 最小分数门槛过高")
-            else:
-                print("4. ℹ️  相似度普遍较低，这是正常现象")
+            # 3. 测试修正的相似度计算
+            await self.test_corrected_similarity_calculation()
 
-        print("\n💡 解决建议:")
-        print("1. 立即可行:")
-        print("   - 使用零门槛测试 (min_score: 0.0)")
-        print("   - 调整权重，降低结构化匹配权重")
-        print("   - 使用语义优先配置")
+            # 4. 清理重复记录
+            await self.clean_duplicate_matches()
 
-        print("\n2. 长期优化:")
-        print("   - 改进结构化匹配算法")
-        print("   - 优化权重分配策略")
-        print("   - 增加数据质量检查")
+            # 5. 生成代码修复建议
+            await self.generate_code_fixes()
 
-        print("\n🛠️ 下一步操作:")
-        print("1. 使用上面的API测试命令验证")
-        print("2. 检查具体的结构化匹配分数")
-        print("3. 考虑调整匹配算法参数")
+            print("\n" + "=" * 80)
+            print("🎉 Vector修复诊断完成！")
+            print("💡 关键修复点:")
+            print("1. ✅ Vector数据需要从字符串转换为numpy数组")
+            print("2. ✅ 使用 <=> 操作符计算余弦距离")
+            print("3. ✅ 相似度 = 1 - 余弦距离")
+            print("4. ✅ 确保所有分数在[0,1]范围内")
+            print("5. ✅ 添加手动计算作为备选方案")
+            print("=" * 80)
+
+        except Exception as e:
+            print(f"❌ Vector修复诊断失败: {str(e)}")
+            import traceback
+
+            print(f"详细错误:\n{traceback.format_exc()}")
 
 
 async def main():
     """主函数"""
-    debugger = FixedEmbeddingMatchingDebugger()
-    await debugger.run_full_diagnosis_fixed()
+    debugger = VectorFixedEmbeddingDebugger()
+    await debugger.run_complete_vector_fix_diagnosis()
 
 
 if __name__ == "__main__":
