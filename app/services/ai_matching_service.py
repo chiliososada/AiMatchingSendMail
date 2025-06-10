@@ -1,4 +1,4 @@
-# app/services/ai_matching_service.py - 简化版（只匹配技能、经验、日语水平）
+# app/services/ai_matching_service.py - 修复版（解决fetch_val导入错误）
 import asyncio
 import json
 import time
@@ -14,6 +14,7 @@ from ..database import (
     get_db_transaction,
     fetch_one,
     fetch_all,
+    fetch_val,  # 修复：添加缺失的导入
     execute_query,
 )
 from ..schemas.ai_matching_schemas import (
@@ -32,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 
 class AIMatchingService:
-    """AI匹配服务 - 简化版（只匹配技能、经验、日语水平）"""
+    """AI匹配服务 - 修复版（解决导入错误）"""
 
     def __init__(self):
         self.model = None
@@ -655,7 +656,7 @@ class AIMatchingService:
         min_score: float,
         matching_history_id: UUID,
     ) -> List[MatchResult]:
-        """计算案件-简历匹配（简化版）"""
+        """计算案件-简历匹配"""
         matches = []
 
         # 使用pgvector进行相似度计算
@@ -672,7 +673,7 @@ class AIMatchingService:
 
         for engineer, similarity_score in engineer_similarities:
             try:
-                # 计算详细匹配分数（只保留3个维度）
+                # 计算详细匹配分数
                 detailed_scores = self._calculate_detailed_match_scores(
                     project_info, engineer
                 )
@@ -972,7 +973,7 @@ class AIMatchingService:
     async def _save_matches(
         self, matches: List[MatchResult], matching_history_id: UUID
     ) -> List[MatchResult]:
-        """保存匹配结果（简化版）"""
+        """保存匹配结果（修复版 - 正确使用fetch_val）"""
         if not matches:
             return []
 
@@ -981,6 +982,11 @@ class AIMatchingService:
         async with get_db_connection() as conn:
             for match in matches:
                 try:
+                    # 修复：正确获取tenant_id
+                    tenant_id = await self._get_tenant_id_from_match(
+                        match.project_id, match.engineer_id
+                    )
+
                     # 插入匹配记录（只保留核心字段）
                     await conn.execute(
                         """
@@ -992,10 +998,7 @@ class AIMatchingService:
                         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
                         """,
                         match.id,
-                        # 需要从project或engineer获取tenant_id
-                        await self._get_tenant_id_from_match(
-                            match.project_id, match.engineer_id
-                        ),
+                        tenant_id,
                         match.project_id,
                         match.engineer_id,
                         matching_history_id,
@@ -1025,7 +1028,7 @@ class AIMatchingService:
     async def _get_tenant_id_from_match(
         self, project_id: UUID, engineer_id: UUID
     ) -> UUID:
-        """从匹配中获取tenant_id"""
+        """从匹配中获取tenant_id（修复版 - 正确使用fetch_val）"""
         # 从project表获取tenant_id
         tenant_id = await fetch_val(
             "SELECT tenant_id FROM projects WHERE id = $1", project_id

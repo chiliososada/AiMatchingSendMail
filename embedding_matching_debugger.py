@@ -405,7 +405,7 @@ class FixedEmbeddingMatchingDebugger:
                     min_score=config["min_score"],
                     executed_by=None,
                     matching_type="project_to_engineers",
-                    trigger_type="debug",
+                    trigger_type="api",
                     weights=config["weights"],
                     filters={},
                 )
