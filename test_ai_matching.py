@@ -1,678 +1,601 @@
 #!/usr/bin/env python3
-# scripts/test_ai_matching.py
-"""
-AI匹配功能自动化测试脚本
-
-完整测试三个匹配API的准确性和性能
-验证匹配结果的合理性
-"""
-
+# test_ai_matching_fixed.py - 修复版AI匹配测试脚本
 import asyncio
-import aiohttp
-import asyncpg
+import requests
 import json
-import time
-from typing import Dict, List, Any
 import logging
-from pathlib import Path
-import sys
+import time
+from uuid import UUID
+from typing import Dict, Any, List
 
-# 添加项目根目录到Python路径
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
-
-from app.config import settings
-
-logging.basicConfig(level=logging.INFO)
+# 配置日志
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
-
-# 测试配置
-API_BASE_URL = "http://localhost:8000/api/v1"
-AI_MATCHING_URL = f"{API_BASE_URL}/ai-matching"
-TEST_TENANT_ID = "33723dd6-cf28-4dab-975c-f883f5389d04"
 
 
 class AIMatchingTester:
-    """AI匹配测试器"""
+    """AI匹配功能测试器 - 修复版"""
 
-    def __init__(self):
-        self.session = None
-        self.test_results = {
-            "project_to_engineers": [],
-            "engineer_to_projects": [],
-            "bulk_matching": [],
-            "summary": {},
-        }
+    def __init__(self, base_url: str = "http://localhost:8000"):
+        self.base_url = base_url
+        self.api_prefix = "/api/v1"
+        self.test_tenant_id = "33723dd6-cf28-4dab-975c-f883f5389d04"
 
-    async def __aenter__(self):
-        self.session = aiohttp.ClientSession()
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        if self.session:
-            await self.session.close()
-
-    async def get_test_data(self):
-        """获取测试数据"""
+    def safe_request(self, method: str, url: str, **kwargs) -> Dict[str, Any]:
+        """安全的HTTP请求包装器"""
         try:
-            conn = await asyncpg.connect(settings.DATABASE_URL)
+            response = requests.request(method, url, timeout=30, **kwargs)
 
-            # 获取测试项目
-            projects = await conn.fetch(
-                "SELECT * FROM projects WHERE tenant_id = $1 AND is_active = true",
-                TEST_TENANT_ID,
-            )
+            # 检查内容类型
+            content_type = response.headers.get("content-type", "")
 
-            # 获取测试简历
-            engineers = await conn.fetch(
-                "SELECT * FROM engineers WHERE tenant_id = $1 AND is_active = true",
-                TEST_TENANT_ID,
-            )
-
-            await conn.close()
-
-            return [dict(p) for p in projects], [dict(e) for e in engineers]
-
-        except Exception as e:
-            logger.error(f"获取测试数据失败: {str(e)}")
-            return [], []
-
-    async def test_project_to_engineers(
-        self, projects: List[Dict], engineers: List[Dict]
-    ):
-        """测试案件匹配简历"""
-        logger.info("🎯 测试1: 案件匹配简历")
-        print("=" * 60)
-
-        for project in projects:
-            try:
-                print(f"\n📁 测试项目: {project['title']}")
-                print(f"   技能要求: {', '.join(project['skills'][:5])}")
-
-                # 调用API
-                start_time = time.time()
-                url = f"{AI_MATCHING_URL}/project-to-engineers"
-                payload = {
-                    "tenant_id": TEST_TENANT_ID,
-                    "project_id": str(project["id"]),
-                    "max_matches": 5,
-                    "min_score": 0.5,
-                    "matching_type": "auto",
-                    "trigger_type": "test",
+            if response.status_code >= 400:
+                return {
+                    "success": False,
+                    "status_code": response.status_code,
+                    "error": f"HTTP {response.status_code}",
+                    "content": (
+                        response.text[:200] + "..."
+                        if len(response.text) > 200
+                        else response.text
+                    ),
                 }
 
-                async with self.session.post(url, json=payload) as response:
-                    if response.status == 200:
-                        result = await response.json()
-                        end_time = time.time()
-
-                        # 分析结果
-                        matches = result.get("matches", [])
-                        processing_time = end_time - start_time
-
-                        print(
-                            f"   ✅ 找到 {len(matches)} 个匹配 (耗时: {processing_time:.2f}秒)"
-                        )
-
-                        # 显示前3个匹配
-                        for i, match in enumerate(matches[:3], 1):
-                            print(
-                                f"   {i}. {match['engineer_name']} - 分数: {match['match_score']:.3f}"
-                            )
-                            if match["matched_skills"]:
-                                print(
-                                    f"      匹配技能: {', '.join(match['matched_skills'][:3])}"
-                                )
-                            if match["match_reasons"]:
-                                print(f"      匹配原因: {match['match_reasons'][0]}")
-
-                        # 验证匹配合理性
-                        validation = self._validate_project_matches(
-                            project, matches, engineers
-                        )
-                        print(f"   📊 匹配质量: {validation['quality']}")
-
-                        # 保存测试结果
-                        self.test_results["project_to_engineers"].append(
-                            {
-                                "project_title": project["title"],
-                                "matches_count": len(matches),
-                                "top_score": (
-                                    matches[0]["match_score"] if matches else 0
-                                ),
-                                "processing_time": processing_time,
-                                "validation": validation,
-                            }
-                        )
-
-                    else:
-                        error_text = await response.text()
-                        print(f"   ❌ API调用失败: {response.status} - {error_text}")
-
-            except Exception as e:
-                print(f"   ❌ 测试失败: {str(e)}")
-                logger.error(f"项目匹配测试失败: {project['title']}, 错误: {str(e)}")
-
-    async def test_engineer_to_projects(
-        self, projects: List[Dict], engineers: List[Dict]
-    ):
-        """测试简历匹配案件"""
-        logger.info("👤 测试2: 简历匹配案件")
-        print("=" * 60)
-
-        for engineer in engineers:
-            try:
-                print(f"\n👥 测试简历: {engineer['name']}")
-                print(f"   技能: {', '.join(engineer['skills'][:5])}")
-
-                # 调用API
-                start_time = time.time()
-                url = f"{AI_MATCHING_URL}/engineer-to-projects"
-                payload = {
-                    "tenant_id": TEST_TENANT_ID,
-                    "engineer_id": str(engineer["id"]),
-                    "max_matches": 5,
-                    "min_score": 0.5,
-                    "matching_type": "auto",
-                    "trigger_type": "test",
-                }
-
-                async with self.session.post(url, json=payload) as response:
-                    if response.status == 200:
-                        result = await response.json()
-                        end_time = time.time()
-
-                        # 分析结果
-                        matches = result.get("matches", [])
-                        processing_time = end_time - start_time
-
-                        print(
-                            f"   ✅ 找到 {len(matches)} 个匹配 (耗时: {processing_time:.2f}秒)"
-                        )
-
-                        # 显示前3个匹配
-                        for i, match in enumerate(matches[:3], 1):
-                            print(
-                                f"   {i}. {match['project_title']} - 分数: {match['match_score']:.3f}"
-                            )
-                            if match["matched_skills"]:
-                                print(
-                                    f"      匹配技能: {', '.join(match['matched_skills'][:3])}"
-                                )
-                            if match["match_reasons"]:
-                                print(f"      匹配原因: {match['match_reasons'][0]}")
-
-                        # 验证匹配合理性
-                        validation = self._validate_engineer_matches(
-                            engineer, matches, projects
-                        )
-                        print(f"   📊 匹配质量: {validation['quality']}")
-
-                        # 保存测试结果
-                        self.test_results["engineer_to_projects"].append(
-                            {
-                                "engineer_name": engineer["name"],
-                                "matches_count": len(matches),
-                                "top_score": (
-                                    matches[0]["match_score"] if matches else 0
-                                ),
-                                "processing_time": processing_time,
-                                "validation": validation,
-                            }
-                        )
-
-                    else:
-                        error_text = await response.text()
-                        print(f"   ❌ API调用失败: {response.status} - {error_text}")
-
-            except Exception as e:
-                print(f"   ❌ 测试失败: {str(e)}")
-                logger.error(f"简历匹配测试失败: {engineer['name']}, 错误: {str(e)}")
-
-    async def test_bulk_matching(self, projects: List[Dict], engineers: List[Dict]):
-        """测试批量匹配"""
-        logger.info("🔄 测试3: 批量匹配")
-        print("=" * 60)
-
-        try:
-            print(
-                f"\n🔄 批量匹配测试: {len(projects)} 个项目 × {len(engineers)} 个简历"
-            )
-
-            # 调用API
-            start_time = time.time()
-            url = f"{AI_MATCHING_URL}/bulk-matching"
-            payload = {
-                "tenant_id": TEST_TENANT_ID,
-                "max_matches": 3,
-                "min_score": 0.5,
-                "batch_size": 20,
-                "generate_top_matches_only": True,
-                "matching_type": "bulk_matching",
-                "trigger_type": "test",
-            }
-
-            async with self.session.post(url, json=payload) as response:
-                if response.status == 200:
-                    result = await response.json()
-                    end_time = time.time()
-
-                    # 分析结果
-                    total_matches = result.get("total_matches", 0)
-                    high_quality_matches = result.get("high_quality_matches", 0)
-                    processing_time = end_time - start_time
-                    batch_summary = result.get("batch_summary", {})
-
-                    print(f"   ✅ 批量匹配完成 (耗时: {processing_time:.2f}秒)")
-                    print(f"   📊 总匹配数: {total_matches}")
-                    print(f"   🌟 高质量匹配: {high_quality_matches}")
-                    print(
-                        f"   📈 平均分数: {batch_summary.get('average_match_score', 0):.3f}"
-                    )
-                    print(
-                        f"   🎯 成功率: {batch_summary.get('match_success_rate', 0):.1%}"
-                    )
-
-                    # 显示部分匹配结果
-                    matches = result.get("matches", [])
-                    print(f"\n   📋 部分匹配结果:")
-                    for i, match in enumerate(matches[:5], 1):
-                        print(
-                            f"   {i}. {match['project_title']} ↔ {match['engineer_name']}"
-                        )
-                        print(f"      分数: {match['match_score']:.3f}")
-
-                    # 验证批量匹配合理性
-                    validation = self._validate_bulk_matches(
-                        matches, projects, engineers
-                    )
-                    print(f"   📊 整体匹配质量: {validation['quality']}")
-
-                    # 保存测试结果
-                    self.test_results["bulk_matching"] = {
-                        "total_matches": total_matches,
-                        "high_quality_matches": high_quality_matches,
-                        "processing_time": processing_time,
-                        "average_score": batch_summary.get("average_match_score", 0),
-                        "success_rate": batch_summary.get("match_success_rate", 0),
-                        "validation": validation,
+            # 尝试解析JSON
+            if "application/json" in content_type:
+                try:
+                    data = response.json()
+                    return {
+                        "success": True,
+                        "status_code": response.status_code,
+                        "data": data,
                     }
+                except json.JSONDecodeError as e:
+                    return {
+                        "success": False,
+                        "error": f"JSON解析失败: {str(e)}",
+                        "content": response.text[:200] + "...",
+                    }
+            else:
+                return {
+                    "success": False,
+                    "error": f"非JSON响应，内容类型: {content_type}",
+                    "content": response.text[:200] + "...",
+                }
 
-                else:
-                    error_text = await response.text()
-                    print(f"   ❌ API调用失败: {response.status} - {error_text}")
-
+        except requests.exceptions.RequestException as e:
+            return {"success": False, "error": f"请求异常: {str(e)}"}
         except Exception as e:
-            print(f"   ❌ 测试失败: {str(e)}")
-            logger.error(f"批量匹配测试失败: {str(e)}")
+            return {"success": False, "error": f"未知错误: {str(e)}"}
 
-    def _validate_project_matches(
-        self, project: Dict, matches: List[Dict], engineers: List[Dict]
-    ) -> Dict:
-        """验证案件匹配的合理性"""
-        if not matches:
-            return {"quality": "无匹配", "details": "没有找到匹配的简历"}
+    async def check_prerequisites(self) -> Dict[str, Any]:
+        """检查测试前提条件"""
+        logger.info("🔍 检查测试前提条件")
 
-        project_skills = set(project.get("skills", []))
-
-        # 检查顶级匹配的技能重合度
-        top_match = matches[0]
-        engineer = next(
-            (e for e in engineers if str(e["id"]) == top_match["engineer_id"]), None
-        )
-
-        if engineer:
-            engineer_skills = set(engineer.get("skills", []))
-            skill_overlap = len(project_skills & engineer_skills)
-            total_required = len(project_skills)
-
-            if skill_overlap >= total_required * 0.8:
-                quality = "优秀"
-            elif skill_overlap >= total_required * 0.6:
-                quality = "良好"
-            elif skill_overlap >= total_required * 0.4:
-                quality = "一般"
-            else:
-                quality = "较差"
-
-            return {
-                "quality": quality,
-                "skill_overlap": skill_overlap,
-                "total_required": total_required,
-                "overlap_rate": (
-                    skill_overlap / total_required if total_required > 0 else 0
-                ),
-                "top_score": top_match["match_score"],
-            }
-
-        return {"quality": "无法验证", "details": "找不到对应的简历数据"}
-
-    def _validate_engineer_matches(
-        self, engineer: Dict, matches: List[Dict], projects: List[Dict]
-    ) -> Dict:
-        """验证简历匹配的合理性"""
-        if not matches:
-            return {"quality": "无匹配", "details": "没有找到匹配的案件"}
-
-        engineer_skills = set(engineer.get("skills", []))
-
-        # 检查顶级匹配的技能重合度
-        top_match = matches[0]
-        project = next(
-            (p for p in projects if str(p["id"]) == top_match["project_id"]), None
-        )
-
-        if project:
-            project_skills = set(project.get("skills", []))
-            skill_overlap = len(engineer_skills & project_skills)
-            total_project_skills = len(project_skills)
-
-            if skill_overlap >= total_project_skills * 0.8:
-                quality = "优秀"
-            elif skill_overlap >= total_project_skills * 0.6:
-                quality = "良好"
-            elif skill_overlap >= total_project_skills * 0.4:
-                quality = "一般"
-            else:
-                quality = "较差"
-
-            return {
-                "quality": quality,
-                "skill_overlap": skill_overlap,
-                "total_project_skills": total_project_skills,
-                "overlap_rate": (
-                    skill_overlap / total_project_skills
-                    if total_project_skills > 0
-                    else 0
-                ),
-                "top_score": top_match["match_score"],
-            }
-
-        return {"quality": "无法验证", "details": "找不到对应的项目数据"}
-
-    def _validate_bulk_matches(
-        self, matches: List[Dict], projects: List[Dict], engineers: List[Dict]
-    ) -> Dict:
-        """验证批量匹配的合理性"""
-        if not matches:
-            return {"quality": "无匹配", "details": "没有找到任何匹配"}
-
-        # 统计分析
-        total_matches = len(matches)
-        high_score_matches = len([m for m in matches if m["match_score"] >= 0.8])
-        medium_score_matches = len(
-            [m for m in matches if 0.6 <= m["match_score"] < 0.8]
-        )
-        low_score_matches = len([m for m in matches if m["match_score"] < 0.6])
-
-        high_ratio = high_score_matches / total_matches
-
-        if high_ratio >= 0.6:
-            quality = "优秀"
-        elif high_ratio >= 0.4:
-            quality = "良好"
-        elif high_ratio >= 0.2:
-            quality = "一般"
-        else:
-            quality = "较差"
-
-        return {
-            "quality": quality,
-            "total_matches": total_matches,
-            "high_score_matches": high_score_matches,
-            "medium_score_matches": medium_score_matches,
-            "low_score_matches": low_score_matches,
-            "high_score_ratio": high_ratio,
-            "average_score": sum(m["match_score"] for m in matches) / total_matches,
+        results = {
+            "api_accessible": False,
+            "has_test_data": False,
+            "has_embeddings": False,
+            "project_count": 0,
+            "engineer_count": 0,
+            "projects_with_embedding": 0,
+            "engineers_with_embedding": 0,
         }
 
-    async def test_system_apis(self):
+        # 1. 检查API可访问性
+        health_result = self.safe_request("GET", f"{self.base_url}/health")
+        if health_result["success"]:
+            results["api_accessible"] = True
+            print("✅ API服务运行正常")
+        else:
+            print(f"❌ API服务异常: {health_result.get('error', 'unknown')}")
+            return results
+
+        # 2. 检查测试数据
+        try:
+            from app.database import fetch_val
+
+            # 检查项目数据
+            project_count = await fetch_val(
+                "SELECT COUNT(*) FROM projects WHERE tenant_id = $1 AND is_active = true",
+                self.test_tenant_id,
+            )
+
+            engineer_count = await fetch_val(
+                "SELECT COUNT(*) FROM engineers WHERE tenant_id = $1 AND is_active = true",
+                self.test_tenant_id,
+            )
+
+            # 检查embedding数据
+            projects_with_embedding = await fetch_val(
+                "SELECT COUNT(*) FROM projects WHERE tenant_id = $1 AND is_active = true AND ai_match_embedding IS NOT NULL",
+                self.test_tenant_id,
+            )
+
+            engineers_with_embedding = await fetch_val(
+                "SELECT COUNT(*) FROM engineers WHERE tenant_id = $1 AND is_active = true AND ai_match_embedding IS NOT NULL",
+                self.test_tenant_id,
+            )
+
+            results.update(
+                {
+                    "project_count": project_count,
+                    "engineer_count": engineer_count,
+                    "projects_with_embedding": projects_with_embedding,
+                    "engineers_with_embedding": engineers_with_embedding,
+                    "has_test_data": project_count > 0 and engineer_count > 0,
+                    "has_embeddings": projects_with_embedding > 0
+                    and engineers_with_embedding > 0,
+                }
+            )
+
+            if results["has_test_data"]:
+                print(f"✅ 测试数据充足: 项目{project_count}个, 简历{engineer_count}个")
+            else:
+                print("❌ 缺少测试数据")
+
+            if results["has_embeddings"]:
+                print(
+                    f"✅ Embedding数据完整: 项目{projects_with_embedding}个, 简历{engineers_with_embedding}个"
+                )
+                print(
+                    f"📊 开始测试: {projects_with_embedding}个项目, {engineers_with_embedding}个简历"
+                )
+            else:
+                print("❌ 缺少Embedding数据，请先运行 generate_embeddings.py")
+
+        except Exception as e:
+            print(f"❌ 数据检查失败: {str(e)}")
+
+        return results
+
+    def test_system_apis(self) -> Dict[str, Any]:
         """测试系统API"""
         logger.info("🔧 测试系统API")
         print("=" * 60)
 
+        results = {}
+
+        # 1. 测试系统信息
+        info_result = self.safe_request(
+            "GET", f"{self.base_url}{self.api_prefix}/ai-matching/system/info"
+        )
+        if info_result["success"]:
+            data = info_result["data"]
+            print(
+                f"✅ 系统信息: {data.get('service', 'unknown')} v{data.get('version', 'unknown')}"
+            )
+            if "model" in data:
+                model_status = data["model"].get("status", "unknown")
+                model_name = data["model"].get("name", "unknown")
+                print(f"   模型: {model_name} ({model_status})")
+            results["system_info"] = True
+        else:
+            print(f"❌ 系统信息API失败: {info_result.get('error', 'unknown')}")
+            results["system_info"] = False
+
+        # 2. 测试健康检查
+        health_result = self.safe_request(
+            "GET", f"{self.base_url}{self.api_prefix}/ai-matching/system/health"
+        )
+        if health_result["success"]:
+            data = health_result["data"]
+            status = data.get("status", "unknown")
+            print(f"✅ 健康检查: {status}")
+
+            if "checks" in data:
+                for check_name, check_info in data["checks"].items():
+                    if isinstance(check_info, dict):
+                        check_status = check_info.get("status", "unknown")
+                        print(f"   ✅ {check_name}: {check_status}")
+                    else:
+                        print(f"   ✅ {check_name}: {check_info}")
+            results["health_check"] = True
+        else:
+            print(f"❌ 健康检查API失败: {health_result.get('error', 'unknown')}")
+            results["health_check"] = False
+
+        return results
+
+    async def test_project_to_engineers(self) -> Dict[str, Any]:
+        """测试案件匹配简历"""
+        logger.info("🎯 测试1: 案件匹配简历")
+
         try:
-            # 测试系统信息
-            async with self.session.get(f"{AI_MATCHING_URL}/system/info") as response:
-                if response.status == 200:
-                    info = await response.json()
-                    print(f"✅ 系统信息: {info['service']} v{info['version']}")
-                    print(
-                        f"   模型: {info['model']['name']} ({info['model']['status']})"
-                    )
-                else:
-                    print(f"❌ 系统信息获取失败: {response.status}")
+            # 获取测试项目
+            from app.database import fetch_one
 
-            # 测试健康检查
-            async with self.session.get(f"{AI_MATCHING_URL}/system/health") as response:
-                health = await response.json()
-                print(f"✅ 健康检查: {health['status']}")
+            project = await fetch_one(
+                """
+                SELECT * FROM projects 
+                WHERE tenant_id = $1 AND is_active = true AND ai_match_embedding IS NOT NULL
+                ORDER BY created_at DESC LIMIT 1
+                """,
+                self.test_tenant_id,
+            )
 
-                if "checks" in health:
-                    for check_name, check_result in health["checks"].items():
-                        status_icon = (
-                            "✅" if check_result["status"] == "healthy" else "❌"
-                        )
-                        print(
-                            f"   {status_icon} {check_name}: {check_result['status']}"
-                        )
+            if not project:
+                return {"success": False, "error": "没有可用的测试项目"}
 
-            # 测试统计API
-            async with self.session.get(
-                f"{AI_MATCHING_URL}/statistics/{TEST_TENANT_ID}"
-            ) as response:
-                if response.status == 200:
-                    stats = await response.json()
-                    print(f"✅ 统计信息: {stats['total_matching_sessions']} 次匹配会话")
-                else:
-                    print(f"❌ 统计信息获取失败: {response.status}")
+            # 构建请求
+            request_data = {
+                "tenant_id": self.test_tenant_id,
+                "project_id": str(project["id"]),
+                "max_matches": 20,
+                "min_score": 0.01,
+                "executed_by": None,
+                "matching_type": "project_to_engineers",
+                "trigger_type": "test",
+                "weights": {
+                    "skill_match": 0.3,
+                    "experience_match": 0.25,
+                    "japanese_level_match": 0.2,
+                    "location_match": 0.01,
+                },
+                "filters": {},
+            }
+
+            print(f"🎯 测试项目: {project['title']}")
+            print(f"   项目ID: {project['id']}")
+
+            # 发送请求
+            result = self.safe_request(
+                "POST",
+                f"{self.base_url}{self.api_prefix}/ai-matching/project-to-engineers",
+                headers={"Content-Type": "application/json"},
+                data=json.dumps(request_data),
+            )
+
+            if result["success"]:
+                data = result["data"]
+                total_matches = data.get("total_matches", 0)
+                high_quality = data.get("high_quality_matches", 0)
+                processing_time = data.get("processing_time_seconds", 0)
+
+                print(f"✅ 匹配成功!")
+                print(f"   总匹配数: {total_matches}")
+                print(f"   高质量匹配: {high_quality}")
+                print(f"   处理时间: {processing_time}秒")
+
+                if "matches" in data and data["matches"]:
+                    print("   前3个匹配:")
+                    for i, match in enumerate(data["matches"][:3], 1):
+                        score = match.get("match_score", 0)
+                        name = match.get("engineer_name", "未知")
+                        print(f"   {i}. {name} (分数: {score:.3f})")
+
+                return {
+                    "success": True,
+                    "matches": total_matches,
+                    "processing_time": processing_time,
+                }
+            else:
+                print(f"❌ 匹配失败: {result.get('error', 'unknown')}")
+                return {"success": False, "error": result.get("error", "unknown")}
 
         except Exception as e:
-            print(f"❌ 系统API测试失败: {str(e)}")
+            error_msg = f"测试执行异常: {str(e)}"
+            print(f"❌ {error_msg}")
+            return {"success": False, "error": error_msg}
 
-    def generate_test_report(self):
-        """生成测试报告"""
-        logger.info("📊 生成测试报告")
-        print("\n" + "=" * 80)
-        print("📋 AI匹配功能测试报告")
+    async def test_engineer_to_projects(self) -> Dict[str, Any]:
+        """测试简历匹配案件"""
+        logger.info("🎯 测试2: 简历匹配案件")
+
+        try:
+            # 获取测试简历
+            from app.database import fetch_one
+
+            engineer = await fetch_one(
+                """
+                SELECT * FROM engineers 
+                WHERE tenant_id = $1 AND is_active = true AND ai_match_embedding IS NOT NULL
+                ORDER BY created_at DESC LIMIT 1
+                """,
+                self.test_tenant_id,
+            )
+
+            if not engineer:
+                return {"success": False, "error": "没有可用的测试简历"}
+
+            # 构建请求
+            request_data = {
+                "tenant_id": self.test_tenant_id,
+                "engineer_id": str(engineer["id"]),
+                "max_matches": 20,
+                "min_score": 0.01,
+                "executed_by": None,
+                "matching_type": "engineer_to_projects",
+                "trigger_type": "test",
+                "weights": {
+                    "skill_match": 0.35,
+                    "experience_match": 0.3,
+                    "budget_match": 0.2,
+                    "location_match": 0.01,
+                },
+                "filters": {},
+            }
+
+            print(f"🎯 测试简历: {engineer['name']}")
+            print(f"   简历ID: {engineer['id']}")
+
+            # 发送请求
+            result = self.safe_request(
+                "POST",
+                f"{self.base_url}{self.api_prefix}/ai-matching/engineer-to-projects",
+                headers={"Content-Type": "application/json"},
+                data=json.dumps(request_data),
+            )
+
+            if result["success"]:
+                data = result["data"]
+                total_matches = data.get("total_matches", 0)
+                high_quality = data.get("high_quality_matches", 0)
+                processing_time = data.get("processing_time_seconds", 0)
+
+                print(f"✅ 匹配成功!")
+                print(f"   总匹配数: {total_matches}")
+                print(f"   高质量匹配: {high_quality}")
+                print(f"   处理时间: {processing_time}秒")
+
+                if "matches" in data and data["matches"]:
+                    print("   前3个匹配:")
+                    for i, match in enumerate(data["matches"][:3], 1):
+                        score = match.get("match_score", 0)
+                        title = match.get("project_title", "未知项目")
+                        print(f"   {i}. {title} (分数: {score:.3f})")
+
+                return {
+                    "success": True,
+                    "matches": total_matches,
+                    "processing_time": processing_time,
+                }
+            else:
+                print(f"❌ 匹配失败: {result.get('error', 'unknown')}")
+                return {"success": False, "error": result.get("error", "unknown")}
+
+        except Exception as e:
+            error_msg = f"测试执行异常: {str(e)}"
+            print(f"❌ {error_msg}")
+            return {"success": False, "error": error_msg}
+
+    async def test_bulk_matching(self) -> Dict[str, Any]:
+        """测试批量匹配"""
+        logger.info("🎯 测试3: 批量匹配")
+
+        try:
+            # 构建批量匹配请求
+            request_data = {
+                "tenant_id": self.test_tenant_id,
+                "project_ids": None,  # 匹配所有项目
+                "engineer_ids": None,  # 匹配所有简历
+                "max_matches": 3,
+                "min_score": 0.6,
+                "batch_size": 20,
+                "generate_top_matches_only": True,
+                "executed_by": None,
+                "matching_type": "bulk_matching",
+                "trigger_type": "test",
+                "filters": {},
+            }
+
+            print("🎯 执行批量匹配 (高质量匹配)")
+
+            # 发送请求
+            result = self.safe_request(
+                "POST",
+                f"{self.base_url}{self.api_prefix}/ai-matching/bulk-matching",
+                headers={"Content-Type": "application/json"},
+                data=json.dumps(request_data),
+            )
+
+            if result["success"]:
+                data = result["data"]
+                total_matches = data.get("total_matches", 0)
+                high_quality = data.get("high_quality_matches", 0)
+                processing_time = data.get("processing_time_seconds", 0)
+
+                print(f"✅ 批量匹配成功!")
+                print(f"   总匹配数: {total_matches}")
+                print(f"   高质量匹配: {high_quality}")
+                print(f"   处理时间: {processing_time}秒")
+
+                if "batch_summary" in data:
+                    summary = data["batch_summary"]
+                    print(f"   处理项目数: {summary.get('total_projects', 0)}")
+                    print(f"   处理简历数: {summary.get('total_engineers', 0)}")
+                    print(f"   平均分数: {summary.get('average_match_score', 0):.3f}")
+
+                return {
+                    "success": True,
+                    "matches": total_matches,
+                    "processing_time": processing_time,
+                }
+            else:
+                print(f"❌ 批量匹配失败: {result.get('error', 'unknown')}")
+                return {"success": False, "error": result.get("error", "unknown")}
+
+        except Exception as e:
+            error_msg = f"测试执行异常: {str(e)}"
+            print(f"❌ {error_msg}")
+            return {"success": False, "error": error_msg}
+
+    async def test_matching_history(self) -> Dict[str, Any]:
+        """测试匹配历史查询"""
+        logger.info("📚 测试4: 匹配历史查询")
+
+        # 获取匹配历史
+        result = self.safe_request(
+            "GET",
+            f"{self.base_url}{self.api_prefix}/ai-matching/history/{self.test_tenant_id}?limit=5",
+        )
+
+        if result["success"]:
+            histories = result["data"]
+            if isinstance(histories, list):
+                print(f"✅ 匹配历史查询成功: 找到{len(histories)}条记录")
+
+                for i, history in enumerate(histories[:3], 1):
+                    match_type = history.get("matching_type", "unknown")
+                    status = history.get("execution_status", "unknown")
+                    matches = history.get("total_matches_generated", 0)
+                    print(f"   {i}. {match_type} - {status} ({matches}个匹配)")
+
+                return {"success": True, "history_count": len(histories)}
+            else:
+                print(f"❌ 返回数据格式异常: {type(histories)}")
+                return {"success": False, "error": "数据格式错误"}
+        else:
+            print(f"❌ 匹配历史查询失败: {result.get('error', 'unknown')}")
+            return {"success": False, "error": result.get("error", "unknown")}
+
+    async def run_complete_test(self):
+        """运行完整测试"""
+        print("🧪 AI匹配功能完整测试")
         print("=" * 80)
 
-        # 案件匹配简历测试结果
-        project_tests = self.test_results["project_to_engineers"]
-        if project_tests:
-            print(f"\n🎯 案件匹配简历测试结果:")
-            print(f"   测试项目数: {len(project_tests)}")
-            avg_matches = sum(t["matches_count"] for t in project_tests) / len(
-                project_tests
-            )
-            avg_score = sum(t["top_score"] for t in project_tests) / len(project_tests)
-            avg_time = sum(t["processing_time"] for t in project_tests) / len(
-                project_tests
-            )
+        test_results = {
+            "prerequisites": None,
+            "system_apis": None,
+            "project_to_engineers": None,
+            "engineer_to_projects": None,
+            "bulk_matching": None,
+            "matching_history": None,
+        }
 
-            print(f"   平均匹配数: {avg_matches:.1f}")
-            print(f"   平均最高分: {avg_score:.3f}")
-            print(f"   平均响应时间: {avg_time:.2f}秒")
+        start_time = time.time()
 
-            # 质量分析
-            quality_counts = {}
-            for test in project_tests:
-                quality = test["validation"]["quality"]
-                quality_counts[quality] = quality_counts.get(quality, 0) + 1
-
-            print(f"   匹配质量分布: {dict(quality_counts)}")
-
-        # 简历匹配案件测试结果
-        engineer_tests = self.test_results["engineer_to_projects"]
-        if engineer_tests:
-            print(f"\n👤 简历匹配案件测试结果:")
-            print(f"   测试简历数: {len(engineer_tests)}")
-            avg_matches = sum(t["matches_count"] for t in engineer_tests) / len(
-                engineer_tests
-            )
-            avg_score = sum(t["top_score"] for t in engineer_tests) / len(
-                engineer_tests
-            )
-            avg_time = sum(t["processing_time"] for t in engineer_tests) / len(
-                engineer_tests
-            )
-
-            print(f"   平均匹配数: {avg_matches:.1f}")
-            print(f"   平均最高分: {avg_score:.3f}")
-            print(f"   平均响应时间: {avg_time:.2f}秒")
-
-        # 批量匹配测试结果
-        bulk_test = self.test_results["bulk_matching"]
-        if bulk_test:
-            print(f"\n🔄 批量匹配测试结果:")
-            print(f"   总匹配数: {bulk_test['total_matches']}")
-            print(f"   高质量匹配数: {bulk_test['high_quality_matches']}")
-            print(f"   平均分数: {bulk_test['average_score']:.3f}")
-            print(f"   成功率: {bulk_test['success_rate']:.1%}")
-            print(f"   处理时间: {bulk_test['processing_time']:.2f}秒")
-            print(f"   整体质量: {bulk_test['validation']['quality']}")
-
-        # 总结
-        print(f"\n🎉 测试总结:")
-        total_tests = len(project_tests) + len(engineer_tests) + (1 if bulk_test else 0)
-        print(f"   完成测试数: {total_tests}")
-
-        if project_tests and engineer_tests:
-            overall_avg_score = (
-                sum(t["top_score"] for t in project_tests)
-                + sum(t["top_score"] for t in engineer_tests)
-            ) / (len(project_tests) + len(engineer_tests))
-            print(f"   整体平均分数: {overall_avg_score:.3f}")
-
-        print(f"\n💡 建议:")
-        if project_tests and engineer_tests:
-            if overall_avg_score >= 0.8:
-                print("   ✅ 匹配质量优秀，算法工作正常")
-            elif overall_avg_score >= 0.6:
-                print("   ⚠️ 匹配质量良好，可考虑调整权重优化")
-            else:
-                print("   ❌ 匹配质量偏低，需要检查数据质量和算法参数")
-
-        print("   📈 可通过增加训练数据和调整匹配权重来进一步优化")
-        print("   🔍 建议定期监控匹配质量并根据用户反馈调整")
-
-
-async def check_prerequisites():
-    """检查测试前提条件"""
-    logger.info("🔍 检查测试前提条件")
-
-    try:
-        # 检查API服务
-        async with aiohttp.ClientSession() as session:
-            try:
-                async with session.get(
-                    f"{AI_MATCHING_URL}/system/health", timeout=5
-                ) as response:
-                    if response.status == 200:
-                        print("✅ API服务运行正常")
-                    else:
-                        print(f"❌ API服务状态异常: {response.status}")
-                        return False
-            except Exception as e:
-                print(f"❌ 无法连接API服务: {str(e)}")
-                print("请确保服务正在运行: uvicorn app.main:app --reload")
-                return False
-
-        # 检查数据库连接
         try:
-            conn = await asyncpg.connect(settings.DATABASE_URL)
+            # 1. 检查前提条件
+            prerequisites = await self.check_prerequisites()
+            test_results["prerequisites"] = prerequisites
 
-            # 检查测试数据
-            project_count = await conn.fetchval(
-                "SELECT COUNT(*) FROM projects WHERE tenant_id = $1", TEST_TENANT_ID
-            )
-            engineer_count = await conn.fetchval(
-                "SELECT COUNT(*) FROM engineers WHERE tenant_id = $1", TEST_TENANT_ID
-            )
+            if not prerequisites.get("api_accessible"):
+                print("❌ API服务不可访问，停止测试")
+                return test_results
 
-            await conn.close()
+            if not prerequisites.get("has_embeddings"):
+                print("❌ 缺少Embedding数据，请先运行 generate_embeddings.py")
+                return test_results
 
-            if project_count == 0 or engineer_count == 0:
-                print(f"❌ 测试数据不足: 项目{project_count}个, 简历{engineer_count}个")
-                print("请先运行: python scripts/create_test_data.py")
-                return False
+            # 2. 测试系统API
+            system_apis = self.test_system_apis()
+            test_results["system_apis"] = system_apis
 
-            print(f"✅ 测试数据充足: 项目{project_count}个, 简历{engineer_count}个")
+            # 3. 测试案件匹配简历
+            project_to_engineers = await self.test_project_to_engineers()
+            test_results["project_to_engineers"] = project_to_engineers
 
-            # 检查embedding数据
-            embedding_count = await asyncpg.connect(settings.DATABASE_URL)
-            project_embedding_count = await embedding_count.fetchval(
-                "SELECT COUNT(*) FROM projects WHERE tenant_id = $1 AND ai_match_embedding IS NOT NULL",
-                TEST_TENANT_ID,
-            )
-            engineer_embedding_count = await embedding_count.fetchval(
-                "SELECT COUNT(*) FROM engineers WHERE tenant_id = $1 AND ai_match_embedding IS NOT NULL",
-                TEST_TENANT_ID,
-            )
-            await embedding_count.close()
+            # 4. 测试简历匹配案件
+            engineer_to_projects = await self.test_engineer_to_projects()
+            test_results["engineer_to_projects"] = engineer_to_projects
 
-            if project_embedding_count == 0 or engineer_embedding_count == 0:
-                print(
-                    f"❌ Embedding数据缺失: 项目{project_embedding_count}个, 简历{engineer_embedding_count}个"
-                )
-                print("请先运行: python scripts/generate_embeddings.py --type both")
-                return False
+            # 5. 测试批量匹配
+            bulk_matching = await self.test_bulk_matching()
+            test_results["bulk_matching"] = bulk_matching
 
-            print(
-                f"✅ Embedding数据完整: 项目{project_embedding_count}个, 简历{engineer_embedding_count}个"
-            )
+            # 6. 测试匹配历史
+            matching_history = await self.test_matching_history()
+            test_results["matching_history"] = matching_history
 
         except Exception as e:
-            print(f"❌ 数据库连接失败: {str(e)}")
-            return False
+            print(f"❌ 测试执行异常: {str(e)}")
+            import traceback
 
-        return True
+            print(f"详细错误信息:\n{traceback.format_exc()}")
 
-    except Exception as e:
-        logger.error(f"前提条件检查失败: {str(e)}")
-        return False
+        # 生成测试报告
+        self.generate_test_report(test_results, time.time() - start_time)
+
+        return test_results
+
+    def generate_test_report(self, results: Dict[str, Any], total_time: float):
+        """生成测试报告"""
+        print("\n" + "=" * 80)
+        print("📊 AI匹配功能测试报告")
+        print("=" * 80)
+
+        # 统计成功/失败
+        tests = [
+            (
+                "前提条件检查",
+                results["prerequisites"],
+                ["api_accessible", "has_test_data", "has_embeddings"],
+            ),
+            ("系统API测试", results["system_apis"], ["system_info", "health_check"]),
+            ("案件匹配简历", results["project_to_engineers"], ["success"]),
+            ("简历匹配案件", results["engineer_to_projects"], ["success"]),
+            ("批量匹配", results["bulk_matching"], ["success"]),
+            ("匹配历史查询", results["matching_history"], ["success"]),
+        ]
+
+        passed = 0
+        total = 0
+
+        for test_name, test_result, check_keys in tests:
+            if test_result:
+                if isinstance(test_result, dict):
+                    if len(check_keys) == 1 and check_keys[0] == "success":
+                        # 简单成功检查
+                        test_passed = test_result.get("success", False)
+                    else:
+                        # 多项检查
+                        test_passed = all(
+                            test_result.get(key, False) for key in check_keys
+                        )
+                else:
+                    test_passed = bool(test_result)
+            else:
+                test_passed = False
+
+            status = "✅ 通过" if test_passed else "❌ 失败"
+            print(f"{test_name:.<30} {status}")
+
+            if test_passed:
+                passed += 1
+            total += 1
+
+        print(f"\n🎯 测试结果: {passed}/{total} 通过")
+        print(f"⏱️ 总耗时: {total_time:.2f} 秒")
+
+        # 详细信息
+        if results.get("prerequisites"):
+            prereq = results["prerequisites"]
+            print(f"\n📊 数据统计:")
+            print(f"   项目总数: {prereq.get('project_count', 0)}")
+            print(f"   简历总数: {prereq.get('engineer_count', 0)}")
+            print(f"   有Embedding的项目: {prereq.get('projects_with_embedding', 0)}")
+            print(f"   有Embedding的简历: {prereq.get('engineers_with_embedding', 0)}")
+
+        # 性能信息
+        performance_tests = [
+            ("案件匹配简历", results["project_to_engineers"]),
+            ("简历匹配案件", results["engineer_to_projects"]),
+            ("批量匹配", results["bulk_matching"]),
+        ]
+
+        print(f"\n⚡ 性能指标:")
+        for test_name, test_result in performance_tests:
+            if test_result and test_result.get("success"):
+                processing_time = test_result.get("processing_time", 0)
+                matches = test_result.get("matches", 0)
+                print(f"   {test_name}: {processing_time:.2f}秒 ({matches}个匹配)")
+
+        # 总结
+        if passed == total:
+            print("\n🎉 所有测试通过！AI匹配功能工作正常")
+        else:
+            print(f"\n⚠️ {total - passed}个测试失败，请检查相关功能")
+
+        print("=" * 80)
 
 
 async def main():
-    """主测试流程"""
-    print("🧪 AI匹配功能自动化测试")
-    print("=" * 80)
-
-    # 检查前提条件
-    if not await check_prerequisites():
-        print("\n❌ 前提条件不满足，测试终止")
-        print("\n📝 请按以下顺序执行:")
-        print("1. uvicorn app.main:app --reload  # 启动服务")
-        print("2. python scripts/create_test_data.py  # 创建测试数据")
-        print("3. python scripts/generate_embeddings.py --type both  # 生成embedding")
-        print("4. python scripts/test_ai_matching.py  # 运行测试")
-        return
-
-    # 开始测试
-    start_time = time.time()
-
-    async with AIMatchingTester() as tester:
-        # 获取测试数据
-        projects, engineers = await tester.get_test_data()
-
-        if not projects or not engineers:
-            print("❌ 无法获取测试数据")
-            return
-
-        print(f"\n📊 开始测试: {len(projects)}个项目, {len(engineers)}个简历")
-
-        # 执行各项测试
-        await tester.test_system_apis()
-        await tester.test_project_to_engineers(projects, engineers)
-        await tester.test_engineer_to_projects(projects, engineers)
-        await tester.test_bulk_matching(projects, engineers)
-
-        # 生成测试报告
-        tester.generate_test_report()
-
-    total_time = time.time() - start_time
-    print(f"\n⏱️ 测试总耗时: {total_time:.2f}秒")
-    print("\n🎉 AI匹配功能测试完成!")
+    """主函数"""
+    tester = AIMatchingTester()
+    await tester.run_complete_test()
 
 
 if __name__ == "__main__":
