@@ -69,7 +69,7 @@ class AttachmentManager:
         """
         try:
             # 生成唯一的文件ID
-            attachment_id = str(UUID())
+            attachment_id = uuid4()
 
             # 创建租户专属目录
             tenant_dir = self.base_path / str(tenant_id)
@@ -900,8 +900,6 @@ class EmailService:
             logger.error(f"详细错误信息: {traceback.format_exc()}")
             return None
 
-        # 在 app/services/email_service.py 的 EmailService 类中添加的新方法
-
     async def send_email_individual(
         self,
         email_request: EmailSendRequest,
@@ -983,7 +981,7 @@ class EmailService:
                     individual_results.append(
                         {
                             "recipient": recipient_email,
-                            "queue_id": queue_item["id"],
+                            "queue_id": str(queue_item["id"]),  # 转换为字符串
                             "status": result["status"],
                             "message": result.get("message", ""),
                             "index": index + 1,
@@ -1042,7 +1040,7 @@ class EmailService:
             )
 
             return {
-                "queue_id": batch_queue_id,
+                "queue_id": str(batch_queue_id),  # 转换为字符串
                 "status": overall_status,
                 "message": f"单独发送完成: {success_count} 成功, {failed_count} 失败",
                 "to_emails": to_emails,
@@ -1156,7 +1154,7 @@ class EmailService:
                     individual_results.append(
                         {
                             "recipient": recipient_email,
-                            "queue_id": queue_item["id"],
+                            "queue_id": str(queue_item["id"]),  # 转换为字符串
                             "status": result["status"],
                             "message": result.get("message", ""),
                             "attachment_count": len(attachments_info),
@@ -1217,7 +1215,7 @@ class EmailService:
             )
 
             return {
-                "queue_id": batch_queue_id,
+                "queue_id": str(batch_queue_id),  # 转换为字符串
                 "status": overall_status,
                 "message": f"单独发送带附件邮件完成: {success_count} 成功, {failed_count} 失败",
                 "to_emails": to_emails,
@@ -1252,7 +1250,9 @@ class EmailService:
         attachments_data = {}
         if hasattr(email_request, "attachment_ids") and email_request.attachment_ids:
             attachments_data = {
-                "attachment_ids": email_request.attachment_ids,
+                "attachment_ids": [
+                    str(aid) for aid in email_request.attachment_ids
+                ],  # 转换为字符串
                 "attachment_count": len(email_request.attachment_ids),
             }
 
@@ -1368,6 +1368,23 @@ class EmailService:
         else:
             batch_status = "partial"
 
+        # 确保 metadata 中的所有 UUID 都转换为字符串
+        clean_metadata = {
+            "send_type": "individual_batch",
+            "total_recipients": total_count,
+            "successful_sends": success_count,
+            "failed_sends": failed_count,
+            "individual_results": individual_results,  # 这里的 queue_id 已经是字符串了
+        }
+
+        # 合并原始metadata，确保UUID转换
+        if email_request.metadata:
+            for k, v in email_request.metadata.items():
+                if isinstance(v, UUID):
+                    clean_metadata[k] = str(v)
+                else:
+                    clean_metadata[k] = v
+
         # 创建汇总记录
         async with get_db_connection() as conn:
             await conn.execute(
@@ -1389,15 +1406,6 @@ class EmailService:
                 email_request.scheduled_at or datetime.utcnow(),
                 batch_status,
                 datetime.utcnow() if success_count > 0 else None,
-                json.dumps(
-                    {
-                        "send_type": "individual_batch",
-                        "total_recipients": total_count,
-                        "successful_sends": success_count,
-                        "failed_sends": failed_count,
-                        "individual_results": individual_results,
-                        **(email_request.metadata or {}),
-                    }
-                ),
+                json.dumps(clean_metadata),  # 使用清理后的metadata
                 created_by,
             )
