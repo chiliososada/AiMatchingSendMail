@@ -61,19 +61,19 @@ class EmbeddingGenerator:
         if project.get("skills"):
             skills = project["skills"]
             if isinstance(skills, list):
-                parts.append(f"技能要求: {', '.join(skills)}")
+                parts.append(f"技能: {', '.join(skills)}")
 
-        # 关键技术
-        if project.get("key_technologies"):
-            parts.append(f"关键技术: {project['key_technologies']}")
+        # # 关键技术
+        # if project.get("key_technologies"):
+        #     parts.append(f"关键技术: {project['key_technologies']}")
 
         # 经验要求
         if project.get("experience"):
-            parts.append(f"经验要求: {project['experience']}")
+            parts.append(f"经验: {project['experience']}")
 
         # 日语水平
         if project.get("japanese_level"):
-            parts.append(f"日语要求: {project['japanese_level']}")
+            parts.append(f"日语: {project['japanese_level']}")
 
         # 如果没有任何内容，返回默认文本
         if not parts:
@@ -91,11 +91,11 @@ class EmbeddingGenerator:
             if isinstance(skills, list):
                 parts.append(f"技能: {', '.join(skills)}")
 
-        # 技术关键词
-        if engineer.get("technical_keywords"):
-            keywords = engineer["technical_keywords"]
-            if isinstance(keywords, list):
-                parts.append(f"技术关键词: {', '.join(keywords)}")
+        # # 技术关键词
+        # if engineer.get("technical_keywords"):
+        #     keywords = engineer["technical_keywords"]
+        #     if isinstance(keywords, list):
+        #         parts.append(f"技术关键词: {', '.join(keywords)}")
 
         # 经验
         if engineer.get("experience"):
@@ -103,7 +103,7 @@ class EmbeddingGenerator:
 
         # 日语水平
         if engineer.get("japanese_level"):
-            parts.append(f"日语水平: {engineer['japanese_level']}")
+            parts.append(f"日语: {engineer['japanese_level']}")
 
         # 如果没有任何内容，返回默认文本
         if not parts:
