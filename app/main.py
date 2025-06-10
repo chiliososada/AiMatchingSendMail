@@ -15,7 +15,7 @@ from .config import settings
 from .api.email_routes import router as email_router
 from .api.smtp_routes import router as smtp_router
 from .database import db_manager, health_check as db_health_check
-
+from .api.ai_matching_routes import router as ai_matching_router
 
 # 配置日志
 logging.basicConfig(
@@ -185,6 +185,10 @@ app.include_router(
 app.include_router(
     smtp_router, prefix=f"{settings.API_V1_STR}/smtp", tags=["SMTP配置与解密"]
 )
+app.include_router(
+    ai_matching_router, prefix=f"{settings.API_V1_STR}/ai-matching", tags=["AI智能匹配"]
+)
+
 
 # 根路径和健康检查
 
@@ -206,12 +210,23 @@ async def root():
             "多租户支持",
             "SMTP密码解密接入（兼容aimachingmail）",
             "高性能异步数据库访问",
+            "AI智能匹配系统",  # 新增
+            "案件简历智能推荐",  # 新增
+            "多维度匹配算法",  # 新增
         ],
         "api_endpoints": {
             "docs": "/docs",
             "redoc": "/redoc",
             "email_api": f"{settings.API_V1_STR}/email",
             "smtp_api": f"{settings.API_V1_STR}/smtp",
+            "ai_matching_api": f"{settings.API_V1_STR}/ai-matching",  # 新增
+        },
+        "ai_matching_features": {  # 新增
+            "project_to_engineers": f"{settings.API_V1_STR}/ai-matching/project-to-engineers",
+            "engineer_to_projects": f"{settings.API_V1_STR}/ai-matching/engineer-to-projects",
+            "bulk_matching": f"{settings.API_V1_STR}/ai-matching/bulk-matching",
+            "matching_history": f"{settings.API_V1_STR}/ai-matching/history",
+            "system_info": f"{settings.API_V1_STR}/ai-matching/system/info",
         },
         "smtp_decryption": {
             "guide": f"{settings.API_V1_STR}/smtp/usage/guide",

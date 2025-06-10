@@ -1,0 +1,15 @@
+# 最简化版本 - 只包含核心功能
+fastapi
+uvicorn[standard]
+asyncpg
+pydantic
+pydantic-settings
+python-multipart
+aiofiles
+aiosmtplib
+cryptography
+passlib[bcrypt]
+sentence-transformers
+torch
+numpy
+pgvector
