@@ -82,7 +82,7 @@ class AIMatchingService:
                     # 工程师匹配项目
                     project_id = result["id"]
                     engineer_id = target_info["id"]
-                    project_title = result.get("name", "")  # 这里实际应该是title
+                    project_title = result.get("title", "")  # 这里实际应该是title
                     engineer_name = target_info.get("name", "")
 
                 # 简化版：直接使用相似度分数作为匹配分数

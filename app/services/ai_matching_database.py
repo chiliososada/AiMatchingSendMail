@@ -191,14 +191,20 @@ class AIMatchingDatabase:
         if not candidate_ids:
             return []
 
-        table_name = "engineers" if table_type == "engineers" else "projects"
+        # 根据表类型选择正确的表名和字段名
+        if table_type == "engineers":
+            table_name = "engineers"
+            name_field = "name"
+        else:  # projects
+            table_name = "projects"
+            name_field = "title"  # 项目表使用title字段，不是name字段
 
         # 直接使用pgvector的余弦相似度计算
         # 注意：pgvector的 <=> 返回的是距离，需要转换为相似度
         query = f"""
         SELECT 
             id,
-            name,
+            {name_field} as name,
             1 - (ai_match_embedding <=> $1) as similarity_score
         FROM {table_name}
         WHERE id = ANY($2) 
@@ -213,11 +219,13 @@ class AIMatchingDatabase:
                 query, target_embedding, candidate_ids, min_score, max_matches
             )
 
-            logger.info(f"数据库相似度计算完成: {len(results)} 个结果")
+            logger.info(
+                f"数据库相似度计算完成: {len(results)} 个结果 (表: {table_name})"
+            )
             return [dict(row) for row in results]
 
         except Exception as e:
-            logger.error(f"数据库相似度计算失败: {str(e)}")
+            logger.error(f"数据库相似度计算失败 (表: {table_name}): {str(e)}")
             return []
 
     # ========== 匹配历史管理 ==========
