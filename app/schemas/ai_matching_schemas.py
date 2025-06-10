@@ -23,7 +23,8 @@ class AIMatchingRequest(BaseModel):
     )
 
     class Config:
-        schema_extra = {
+        # 修复：将 schema_extra 改为 json_schema_extra
+        json_schema_extra = {
             "example": {
                 "tenant_id": "123e4567-e89b-12d3-a456-426614174000",
                 "max_matches": 10,

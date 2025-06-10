@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# scripts/generate_embeddings.py
+# scripts/generate_embeddings.py - 修复版
 """
 Embedding生成和更新脚本
 
@@ -176,8 +176,8 @@ class EmbeddingGenerator:
 
         return " | ".join(parts)
 
-    def generate_embeddings(self, texts: List[str]) -> List[List[float]]:
-        """生成embedding向量"""
+    def generate_embeddings(self, texts: List[str]) -> List[str]:
+        """生成embedding向量并转换为PostgreSQL VECTOR格式"""
         if not self.model:
             raise Exception("模型未加载")
 
@@ -187,8 +187,21 @@ class EmbeddingGenerator:
         # 生成embeddings
         embeddings = self.model.encode(valid_texts, batch_size=self.batch_size)
 
-        # 转换为列表格式
-        return [emb.tolist() for emb in embeddings]
+        # 转换为PostgreSQL VECTOR类型可接受的字符串格式
+        vector_strings = []
+        for emb in embeddings:
+            # 将numpy数组转换为Python列表，然后转换为字符串格式
+            emb_list = emb.tolist()
+            # 格式化为 '[1.0,2.0,3.0]' 的字符串
+            vector_str = "[" + ",".join(map(str, emb_list)) + "]"
+            vector_strings.append(vector_str)
+
+        return vector_strings
+
+
+def embedding_to_vector_string(embedding: List[float]) -> str:
+    """将embedding列表转换为PostgreSQL VECTOR类型的字符串格式"""
+    return "[" + ",".join(map(str, embedding)) + "]"
 
 
 async def update_projects_embeddings(
@@ -248,28 +261,30 @@ async def update_projects_embeddings(
                     paraphrases.append(paraphrase)
                     project_ids.append(project["id"])
 
-                # 生成embeddings
+                # 生成embeddings（已经是字符串格式）
                 logger.info(f"生成第 {i//generator.batch_size + 1} 批embeddings...")
-                embeddings = generator.generate_embeddings(paraphrases)
+                embedding_strings = generator.generate_embeddings(paraphrases)
 
                 # 更新数据库
-                for j, (project_id, paraphrase, embedding) in enumerate(
-                    zip(project_ids, paraphrases, embeddings)
+                for j, (project_id, paraphrase, embedding_str) in enumerate(
+                    zip(project_ids, paraphrases, embedding_strings)
                 ):
                     try:
                         await conn.execute(
                             """
                             UPDATE projects 
-                            SET ai_match_paraphrase = $1, ai_match_embedding = $2, updated_at = NOW()
+                            SET ai_match_paraphrase = $1, ai_match_embedding = $2::vector, updated_at = NOW()
                             WHERE id = $3
                         """,
                             paraphrase,
-                            embedding,
+                            embedding_str,  # 现在是字符串格式
                             project_id,
                         )
                         updated_count += 1
+                        logger.debug(f"✅ 项目 {project_id} 更新成功")
                     except Exception as e:
-                        logger.error(f"更新项目 {project_id} 失败: {str(e)}")
+                        logger.error(f"❌ 更新项目 {project_id} 失败: {str(e)}")
+                        continue
 
                 logger.info(
                     f"已处理 {min(i + generator.batch_size, len(projects))}/{len(projects)} 个项目"
@@ -342,28 +357,30 @@ async def update_engineers_embeddings(
                     paraphrases.append(paraphrase)
                     engineer_ids.append(engineer["id"])
 
-                # 生成embeddings
+                # 生成embeddings（已经是字符串格式）
                 logger.info(f"生成第 {i//generator.batch_size + 1} 批embeddings...")
-                embeddings = generator.generate_embeddings(paraphrases)
+                embedding_strings = generator.generate_embeddings(paraphrases)
 
                 # 更新数据库
-                for j, (engineer_id, paraphrase, embedding) in enumerate(
-                    zip(engineer_ids, paraphrases, embeddings)
+                for j, (engineer_id, paraphrase, embedding_str) in enumerate(
+                    zip(engineer_ids, paraphrases, embedding_strings)
                 ):
                     try:
                         await conn.execute(
                             """
                             UPDATE engineers 
-                            SET ai_match_paraphrase = $1, ai_match_embedding = $2, updated_at = NOW()
+                            SET ai_match_paraphrase = $1, ai_match_embedding = $2::vector, updated_at = NOW()
                             WHERE id = $3
                         """,
                             paraphrase,
-                            embedding,
+                            embedding_str,  # 现在是字符串格式
                             engineer_id,
                         )
                         updated_count += 1
+                        logger.debug(f"✅ 简历 {engineer_id} 更新成功")
                     except Exception as e:
-                        logger.error(f"更新简历 {engineer_id} 失败: {str(e)}")
+                        logger.error(f"❌ 更新简历 {engineer_id} 失败: {str(e)}")
+                        continue
 
                 logger.info(
                     f"已处理 {min(i + generator.batch_size, len(engineers))}/{len(engineers)} 个简历"
@@ -440,6 +457,38 @@ async def show_embedding_statistics():
         logger.error(f"获取统计信息失败: {str(e)}")
 
 
+async def test_embedding_storage():
+    """测试embedding存储功能"""
+    try:
+        logger.info("测试embedding存储功能...")
+
+        conn = await asyncpg.connect(settings.DATABASE_URL)
+
+        try:
+            # 创建测试向量
+            test_vector = [0.1, 0.2, 0.3, 0.4, 0.5]
+            vector_str = "[" + ",".join(map(str, test_vector)) + "]"
+
+            # 测试向量存储
+            result = await conn.fetchval("SELECT $1::vector as test_vector", vector_str)
+
+            logger.info(f"✅ 向量存储测试成功: {vector_str} -> {result}")
+
+            # 测试向量相似度计算
+            similarity = await conn.fetchval(
+                "SELECT $1::vector <#> $2::vector as similarity", vector_str, vector_str
+            )
+
+            logger.info(f"✅ 向量相似度测试成功: {similarity}")
+
+        finally:
+            await conn.close()
+
+    except Exception as e:
+        logger.error(f"❌ embedding存储测试失败: {str(e)}")
+        raise
+
+
 def main():
     """主函数"""
     import argparse
@@ -455,6 +504,7 @@ def main():
     parser.add_argument("--force", action="store_true", help="强制更新所有记录")
     parser.add_argument("--limit", type=int, help="限制处理数量")
     parser.add_argument("--stats-only", action="store_true", help="只显示统计信息")
+    parser.add_argument("--test", action="store_true", help="测试embedding存储功能")
 
     args = parser.parse_args()
 
@@ -462,6 +512,11 @@ def main():
     print("=" * 50)
 
     try:
+        # 测试embedding存储功能
+        if args.test:
+            asyncio.run(test_embedding_storage())
+            return
+
         # 只显示统计信息
         if args.stats_only:
             asyncio.run(show_embedding_statistics())
@@ -505,9 +560,13 @@ def main():
         print("- 新增项目或简历后，运行此脚本更新embedding")
         print("- 定期重新生成以保持匹配准确性")
         print("- 可以使用 --stats-only 查看当前状态")
+        print("- 使用 --test 测试embedding存储功能")
 
     except Exception as e:
         print(f"\n❌ 执行失败: {str(e)}")
+        import traceback
+
+        print(f"详细错误信息:\n{traceback.format_exc()}")
         sys.exit(1)
 
 

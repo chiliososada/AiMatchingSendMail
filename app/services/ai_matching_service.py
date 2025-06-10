@@ -1,9 +1,9 @@
-# app/services/ai_matching_service.py
+# app/services/ai_matching_service.py - 完整修复版
 import asyncio
 import json
 import time
 from datetime import datetime, timedelta
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any, Tuple, Union
 from uuid import UUID, uuid4
 import logging
 import numpy as np
@@ -48,6 +48,82 @@ class AIMatchingService:
         except Exception as e:
             logger.error(f"AI模型加载失败: {str(e)}")
             raise Exception(f"无法加载AI模型: {str(e)}")
+
+    def _serialize_for_db(self, value: Union[Dict[str, Any], List, None]) -> str:
+        """序列化数据为数据库JSONB字段"""
+        if value is None:
+            return json.dumps({})
+        try:
+            return json.dumps(value, ensure_ascii=False)
+        except (TypeError, ValueError) as e:
+            logger.warning(f"序列化失败，使用空对象: {e}")
+            return json.dumps({})
+
+    def _parse_jsonb_field(self, value: Union[str, dict, None]) -> Dict[str, Any]:
+        """安全解析JSONB字段"""
+        if value is None:
+            return {}
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str):
+            try:
+                return json.loads(value) if value.strip() else {}
+            except (json.JSONDecodeError, ValueError):
+                logger.warning(f"无法解析JSON字符串: {value}")
+                return {}
+        return {}
+
+    def _parse_list_field(self, value: Union[str, list, None]) -> List[UUID]:
+        """安全解析列表字段"""
+        if value is None:
+            return []
+        if isinstance(value, list):
+            # 确保列表中的元素是UUID格式
+            try:
+                return [UUID(str(item)) for item in value]
+            except (ValueError, TypeError):
+                return []
+        if isinstance(value, str):
+            try:
+                if not value.strip() or value.strip() in ["[]", "{}"]:
+                    return []
+                parsed = json.loads(value)
+                if isinstance(parsed, list):
+                    return [UUID(str(item)) for item in parsed]
+                return []
+            except (json.JSONDecodeError, ValueError, TypeError):
+                return []
+        return []
+
+    def _format_matching_history(self, history_data: Dict[str, Any]) -> Dict[str, Any]:
+        """格式化匹配历史数据"""
+        # 确保JSONB字段正确解析
+        history_data["ai_config"] = self._parse_jsonb_field(
+            history_data.get("ai_config")
+        )
+        history_data["statistics"] = self._parse_jsonb_field(
+            history_data.get("statistics")
+        )
+        history_data["filters"] = self._parse_jsonb_field(history_data.get("filters"))
+
+        # 确保列表字段正确处理
+        if isinstance(history_data.get("project_ids"), str):
+            try:
+                history_data["project_ids"] = json.loads(history_data["project_ids"])
+            except:
+                history_data["project_ids"] = []
+        elif history_data.get("project_ids") is None:
+            history_data["project_ids"] = []
+
+        if isinstance(history_data.get("engineer_ids"), str):
+            try:
+                history_data["engineer_ids"] = json.loads(history_data["engineer_ids"])
+            except:
+                history_data["engineer_ids"] = []
+        elif history_data.get("engineer_ids") is None:
+            history_data["engineer_ids"] = []
+
+        return history_data
 
     async def match_project_to_engineers(
         self, request: ProjectToEngineersMatchRequest
@@ -390,30 +466,40 @@ class AIMatchingService:
     ) -> Dict[str, Any]:
         """创建匹配历史记录"""
         async with get_db_connection() as conn:
+            # 确保存储的是有效的JSON字符串（某些asyncpg版本需要这样处理）
+            filters_json = json.dumps(filters or {})
+            project_ids_list = project_ids or []
+            engineer_ids_list = engineer_ids or []
+            ai_config_json = json.dumps({})
+            statistics_json = json.dumps({})
+
             history_id = await conn.fetchval(
                 """
                 INSERT INTO ai_matching_history (
                     tenant_id, executed_by, matching_type, trigger_type,
-                    project_ids, engineer_ids, filters, ai_model_version
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    project_ids, engineer_ids, filters, ai_model_version,
+                    ai_config, statistics
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                 RETURNING id
                 """,
                 tenant_id,
                 executed_by,
                 matching_type,
                 trigger_type,
-                project_ids or [],
-                engineer_ids or [],
-                json.dumps(filters or {}),
+                project_ids_list,  # 列表可以直接传递
+                engineer_ids_list,
+                filters_json,  # 转换为JSON字符串
                 self.model_version,
+                ai_config_json,  # 转换为JSON字符串
+                statistics_json,  # 转换为JSON字符串
             )
 
-            # 获取创建的记录
-            history = await conn.fetchrow(
+            # 获取创建的记录并格式化
+            history_data = await conn.fetchrow(
                 "SELECT * FROM ai_matching_history WHERE id = $1", history_id
             )
 
-            return dict(history)
+            return self._format_matching_history(dict(history_data))
 
     async def _update_matching_history(
         self,
@@ -431,6 +517,19 @@ class AIMatchingService:
     ):
         """更新匹配历史"""
         async with get_db_connection() as conn:
+            # 准备统计数据并转换为JSON字符串
+            statistics = {
+                "total_projects_input": total_projects_input,
+                "total_engineers_input": total_engineers_input,
+                "total_matches_generated": total_matches_generated,
+                "high_quality_matches": high_quality_matches,
+                "processing_time_seconds": processing_time_seconds,
+            }
+
+            # 转换为JSON字符串
+            ai_config_json = json.dumps(ai_config or {})
+            statistics_json = json.dumps(statistics)
+
             await conn.execute(
                 """
                 UPDATE ai_matching_history SET
@@ -443,8 +542,9 @@ class AIMatchingService:
                     processing_time_seconds = $8,
                     error_message = $9,
                     ai_config = $10,
-                    project_ids = COALESCE($11, project_ids),
-                    engineer_ids = COALESCE($12, engineer_ids)
+                    statistics = $11,
+                    project_ids = COALESCE($12, project_ids),
+                    engineer_ids = COALESCE($13, engineer_ids)
                 WHERE id = $1
                 """,
                 history_id,
@@ -460,7 +560,8 @@ class AIMatchingService:
                 high_quality_matches,
                 processing_time_seconds,
                 error_message,
-                json.dumps(ai_config or {}),
+                ai_config_json,  # 使用JSON字符串
+                statistics_json,  # 使用JSON字符串
                 project_ids,
                 engineer_ids,
             )
@@ -1236,8 +1337,13 @@ class AIMatchingService:
                 SELECT * FROM ai_matching_history 
                 WHERE id = $1 AND tenant_id = $2
                 """
-                history = await fetch_one(query, history_id, tenant_id)
-                return [MatchingHistoryResponse(**history)] if history else []
+                history_data = await fetch_one(query, history_id, tenant_id)
+                if not history_data:
+                    return []
+
+                # 格式化数据
+                formatted_data = self._format_matching_history(dict(history_data))
+                return [MatchingHistoryResponse(**formatted_data)]
             else:
                 query = """
                 SELECT * FROM ai_matching_history 
@@ -1246,7 +1352,16 @@ class AIMatchingService:
                 LIMIT $2
                 """
                 histories = await fetch_all(query, tenant_id, limit)
-                return [MatchingHistoryResponse(**h) for h in histories]
+
+                # 格式化所有历史记录
+                formatted_histories = []
+                for history in histories:
+                    formatted_data = self._format_matching_history(dict(history))
+                    formatted_histories.append(
+                        MatchingHistoryResponse(**formatted_data)
+                    )
+
+                return formatted_histories
 
         except Exception as e:
             logger.error(f"获取匹配历史失败: {str(e)}")
