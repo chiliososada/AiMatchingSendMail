@@ -338,7 +338,7 @@ class AIMatchingDatabase:
     async def save_matches(
         self, matches: List[MatchResult], matching_history_id: UUID
     ) -> List[MatchResult]:
-        """保存匹配结果"""
+        """保存匹配结果 - 修复版"""
         if not matches:
             return []
 
@@ -352,45 +352,104 @@ class AIMatchingDatabase:
                         "SELECT tenant_id FROM projects WHERE id = $1", match.project_id
                     )
 
-                    await conn.execute(
+                    if not tenant_id:
+                        logger.error(f"找不到项目的tenant_id: {match.project_id}")
+                        continue
+
+                    # 方法1: 先检查是否存在，然后决定INSERT或UPDATE
+                    existing_match = await conn.fetchrow(
                         """
-                        INSERT INTO project_engineer_matches (
-                            id, tenant_id, project_id, engineer_id, matching_history_id,
-                            match_score, confidence_score, skill_match_score, 
-                            experience_match_score, japanese_level_match_score,
-                            matched_skills, missing_skills, matched_experiences, 
-                            missing_experiences, match_reasons, concerns, status
-                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
-                        ON CONFLICT (tenant_id, project_id, engineer_id) 
-                        DO UPDATE SET
-                            match_score = EXCLUDED.match_score,
-                            confidence_score = EXCLUDED.confidence_score,
-                            matching_history_id = EXCLUDED.matching_history_id,
-                            updated_at = NOW()
+                        SELECT id FROM project_engineer_matches 
+                        WHERE tenant_id = $1 AND project_id = $2 AND engineer_id = $3
                         """,
-                        match.id,
                         tenant_id,
                         match.project_id,
                         match.engineer_id,
-                        matching_history_id,
-                        match.match_score,
-                        match.confidence_score,
-                        None,  # skill_match_score - 简化版不使用
-                        None,  # experience_match_score - 简化版不使用
-                        None,  # japanese_level_match_score - 简化版不使用
-                        [],  # matched_skills - 简化版不使用
-                        [],  # missing_skills - 简化版不使用
-                        [],  # matched_experiences - 简化版不使用
-                        [],  # missing_experiences - 简化版不使用
-                        ["基于embedding相似度匹配"],  # match_reasons
-                        [],  # concerns - 简化版不使用
-                        match.status,
                     )
+
+                    if existing_match:
+                        # 更新现有记录
+                        await conn.execute(
+                            """
+                            UPDATE project_engineer_matches SET
+                                match_score = $1,
+                                confidence_score = $2,
+                                matching_history_id = $3,
+                                skill_match_score = $4,
+                                experience_match_score = $5,
+                                japanese_level_match_score = $6,
+                                matched_skills = $7,
+                                missing_skills = $8,
+                                matched_experiences = $9,
+                                missing_experiences = $10,
+                                match_reasons = $11,
+                                concerns = $12,
+                                status = $13,
+                                updated_at = NOW()
+                            WHERE tenant_id = $14 AND project_id = $15 AND engineer_id = $16
+                            """,
+                            match.match_score,
+                            match.confidence_score,
+                            matching_history_id,
+                            None,  # skill_match_score - 简化版不使用
+                            None,  # experience_match_score - 简化版不使用
+                            None,  # japanese_level_match_score - 简化版不使用
+                            [],  # matched_skills - 简化版不使用
+                            [],  # missing_skills - 简化版不使用
+                            [],  # matched_experiences - 简化版不使用
+                            [],  # missing_experiences - 简化版不使用
+                            ["基于embedding相似度匹配"],  # match_reasons
+                            [],  # concerns - 简化版不使用
+                            match.status,
+                            tenant_id,
+                            match.project_id,
+                            match.engineer_id,
+                        )
+                        logger.debug(
+                            f"更新匹配记录: {match.project_id} -> {match.engineer_id}"
+                        )
+                    else:
+                        # 插入新记录
+                        await conn.execute(
+                            """
+                            INSERT INTO project_engineer_matches (
+                                id, tenant_id, project_id, engineer_id, matching_history_id,
+                                match_score, confidence_score, skill_match_score, 
+                                experience_match_score, japanese_level_match_score,
+                                matched_skills, missing_skills, matched_experiences, 
+                                missing_experiences, match_reasons, concerns, status
+                            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+                            """,
+                            match.id,
+                            tenant_id,
+                            match.project_id,
+                            match.engineer_id,
+                            matching_history_id,
+                            match.match_score,
+                            match.confidence_score,
+                            None,  # skill_match_score - 简化版不使用
+                            None,  # experience_match_score - 简化版不使用
+                            None,  # japanese_level_match_score - 简化版不使用
+                            [],  # matched_skills - 简化版不使用
+                            [],  # missing_skills - 简化版不使用
+                            [],  # matched_experiences - 简化版不使用
+                            [],  # missing_experiences - 简化版不使用
+                            ["基于embedding相似度匹配"],  # match_reasons
+                            [],  # concerns - 简化版不使用
+                            match.status,
+                        )
+                        logger.debug(
+                            f"插入新匹配记录: {match.project_id} -> {match.engineer_id}"
+                        )
 
                     saved_matches.append(match)
 
                 except Exception as e:
                     logger.error(f"保存匹配记录失败: {match.id}, 错误: {str(e)}")
+                    # 打印详细错误信息用于调试
+                    import traceback
+
+                    logger.error(f"详细错误: {traceback.format_exc()}")
                     continue
 
         logger.info(f"成功保存 {len(saved_matches)}/{len(matches)} 个匹配记录")
