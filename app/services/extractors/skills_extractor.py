@@ -689,259 +689,213 @@ class SkillsExtractor(BaseExtractor):
 
         return False
 
-    def _normalize_skill_name(self, skill: str) -> str:
-        """标准化技能名称 - 增强版本"""
+    def _normalize_skill_name(self, skill) -> str:
+        """标准化技能名称 - 修复版本，处理各种数据类型"""
+        # 🔥 关键修复：处理各种可能的数据类型
+        if skill is None:
+            return ""
+
+        # 如果是列表类型，尝试处理
+        if isinstance(skill, list):
+            if not skill:  # 空列表
+                return ""
+            # 取第一个非空元素
+            for item in skill:
+                if item and str(item).strip():
+                    skill = str(item).strip()
+                    break
+            else:
+                return ""  # 列表中没有有效数据
+
+        # 如果是其他非字符串类型，转换为字符串
+        if not isinstance(skill, str):
+            skill = str(skill)
+
+        # 现在可以安全地调用字符串方法
         skill = skill.strip()
 
-        # 处理冒号分隔的情况（支持全角和半角冒号）
-        # 例如: "言語:Java" -> "Java", "DB：PostgreSQL" -> "PostgreSQL"
-        if ":" in skill or "：" in skill:
-            # 替换全角冒号为半角，然后分割
-            skill_parts = skill.replace("：", ":").split(":", 1)
-            if len(skill_parts) == 2:
-                # 取冒号后面的部分
-                skill = skill_parts[1].strip()
-                # 如果冒号后面为空，返回原始值
-                if not skill:
-                    skill = skill_parts[0].strip()
+        if not skill:
+            return ""
 
-        # 特殊处理：操作系统标准化
-        # 如果包含 Windows（无论大小写），统一返回 Windows
-        if "windows" in skill.lower():
-            return "Windows"
+        # 移除多余的空格
+        skill = re.sub(r"\s+", " ", skill)
 
-        # 如果包含 Linux（无论大小写），统一返回 Linux
-        if "linux" in skill.lower():
-            return "Linux"
+        # 移除引号
+        skill = skill.strip('"\'""' "")
 
-        # **增强的技能名称映射**
-        skill_mapping = {
-            # 编程语言
-            "JAVA": "Java",
-            "java": "Java",
-            "Javascript": "JavaScript",
+        # 标准化常见技能名称
+        skill_mappings = {
             "javascript": "JavaScript",
-            "JAVASCRIPT": "JavaScript",
+            "js": "JavaScript",
             "typescript": "TypeScript",
-            "TYPESCRIPT": "TypeScript",
-            "python": "Python",
-            "PYTHON": "Python",
-            "C#": "C#",
-            "c#": "C#",
-            "C++": "C++",
-            "c++": "C++",
-            "C": "C",
-            "c": "C",
-            "PHP": "PHP",
-            "php": "PHP",
-            "Ruby": "Ruby",
-            "ruby": "Ruby",
-            "GO": "Go",
-            "go": "Go",
-            "VB．NET": "VB.NET",
-            "VB.NET": "VB.NET",
-            "ASP．NET": "ASP.NET",
-            "ASP.NET": "ASP.NET",
-            "COBOL": "COBOL",
-            "cobol": "COBOL",
-            "Groovy": "Groovy",
-            "groovy": "Groovy",
-            "Objective-C": "Objective-C",
-            "objective-c": "Objective-C",
-            "Swift": "Swift",
-            "swift": "Swift",
-            "Kotlin": "Kotlin",
-            "kotlin": "Kotlin",
-            "HTML5": "HTML5",
-            "html5": "HTML5",
-            "HTML": "HTML",
-            "html": "HTML",
-            "CSS": "CSS",
-            "css": "CSS",
-            # 数据库
-            "MySql": "MySQL",
-            "mysql": "MySQL",
-            "MYSQL": "MySQL",
-            "mybatis": "MyBatis",
-            "Mybatis": "MyBatis",
-            "MYBATIS": "MyBatis",
-            "PostgreSQL": "PostgreSQL",
-            "Postgre SQL": "PostgreSQL",
-            "postgresql": "PostgreSQL",
-            "SqlServer": "SQL Server",
-            "SQLServer": "SQL Server",
-            "sqlserver": "SQL Server",
-            "SQL SERVER": "SQL Server",
-            "ORACLE": "Oracle",
-            "oracle": "Oracle",
-            "Oracle": "Oracle",
-            "DB2": "DB2",
-            "db2": "DB2",
-            "ACCESS": "Access",
-            "access": "Access",
-            "Access": "Access",
-            "ADABAS": "ADABAS",
-            "adabas": "ADABAS",
-            "HIRDB": "HiRDB",
-            "hirdb": "HiRDB",
-            # 框架
-            "spring": "Spring",
-            "Spring": "Spring",
-            "SPRING": "Spring",
-            "spring boot": "Spring Boot",
-            "springboot": "Spring Boot",
-            "spring-boot": "Spring Boot",
-            "SPRING BOOT": "Spring Boot",
-            "SpringBoot": "Spring Boot",  # **重要：处理这个变体**
-            "SpringMVC": "Spring MVC",
-            "springmvc": "Spring MVC",
-            "Struts1.0": "Struts 1.0",
-            "struts1.0": "Struts 1.0",
-            "Struts2.0": "Struts 2.0",
-            "struts2.0": "Struts 2.0",
-            "thymeleaf": "Thymeleaf",
-            "Thymeleaf": "Thymeleaf",
-            "THYMELEAF": "Thymeleaf",
-            "Angular": "Angular",
-            "angular": "Angular",
-            "ANGULAR": "Angular",
-            "AngularJS": "AngularJS",
-            "angularjs": "AngularJS",
-            "ANGULARJS": "AngularJS",
-            "jQuery": "jQuery",
-            "jquery": "jQuery",
-            "JQUERY": "jQuery",
-            "node.js": "Node.js",
-            "Node.JS": "Node.js",
+            "ts": "TypeScript",
             "nodejs": "Node.js",
-            "NODE.JS": "Node.js",
-            "vue.js": "Vue.js",
-            "Vue.js": "Vue.js",
-            "vuejs": "Vue.js",
-            "VUE.JS": "Vue.js",
-            "react.js": "React",
-            "React.js": "React",
+            "node.js": "Node.js",
+            "node": "Node.js",
             "reactjs": "React",
-            "REACT.JS": "React",
-            "JSF": "JSF",
-            "jsf": "JSF",
-            "BackBone.js": "Backbone.js",
-            "backbone.js": "Backbone.js",
-            # 测试和构建工具
-            "junit": "JUnit",
-            "Junit": "JUnit",
-            "JUNIT": "JUnit",
-            "Spock": "Spock",
-            "spock": "Spock",
-            "Jmeter": "JMeter",
-            "jmeter": "JMeter",
-            "JMETER": "JMeter",
-            "A5M2": "A5:SQL Mk-2",
-            "a5m2": "A5:SQL Mk-2",
-            # IDE和工具
-            "eclipse": "Eclipse",
-            "Eclipse": "Eclipse",
-            "ECLIPSE": "Eclipse",
-            "eclipes": "Eclipse",  # **修复拼写错误**
+            "react.js": "React",
+            "vuejs": "Vue.js",
+            "vue.js": "Vue.js",
+            "vue": "Vue.js",
+            "angularjs": "Angular",
+            "angular.js": "Angular",
+            "c++": "C++",
+            "cpp": "C++",
+            "c#": "C#",
+            "csharp": "C#",
+            "visualstudio": "Visual Studio",
+            "vs": "Visual Studio",
             "vscode": "VS Code",
-            "Vscode": "VS Code",
-            "VSCode": "VS Code",
-            "VS Code": "VS Code",
-            "vs code": "VS Code",
-            "VS code": "VS Code",
-            "Visual Studio Code": "VS Code",
-            "Visual Studio": "Visual Studio",
-            "visual studio": "Visual Studio",
-            "Intellij": "IntelliJ IDEA",
-            "intellij": "IntelliJ IDEA",
-            "IntelliJ": "IntelliJ IDEA",
-            "postman": "Postman",
-            "Postman": "Postman",
-            "POSTMAN": "Postman",
-            "WinMerge": "WinMerge",
-            "winmerge": "WinMerge",
-            "WINMERGE": "WinMerge",
-            # 版本控制
-            "git": "Git",
-            "Git": "Git",
-            "GIT": "Git",
-            "github": "GitHub",
-            "Github": "GitHub",
-            "GITHUB": "GitHub",
-            "svn": "SVN",
-            "Svn": "SVN",
-            "SVN": "SVN",
-            "TortoiseSVN": "TortoiseSVN",
-            "tortoisesvn": "TortoiseSVN",
-            # 云服务
+            "sqlserver": "SQL Server",
+            "sql server": "SQL Server",
+            "mysql": "MySQL",
+            "postgresql": "PostgreSQL",
+            "postgres": "PostgreSQL",
+            "mongodb": "MongoDB",
+            "mongo": "MongoDB",
+            "redis": "Redis",
+            "elasticsearch": "Elasticsearch",
             "aws": "AWS",
-            "Aws": "AWS",
-            "AWS": "AWS",
             "azure": "Azure",
-            "Azure": "Azure",
-            "AZURE": "Azure",
-            "SalseForce": "Salesforce",
-            "salesforce": "Salesforce",
-            "Salesforce": "Salesforce",
-            "OutSystems": "OutSystems",
-            "outsystems": "OutSystems",
-            # 操作系统
-            "Solris": "Solaris",
-            "solaris": "Solaris",
-            "Solaris": "Solaris",
-            "UNIX": "Unix",
-            "unix": "Unix",
-            "Unix": "Unix",
-            "Linux": "Linux",
+            "gcp": "GCP",
+            "docker": "Docker",
+            "kubernetes": "Kubernetes",
+            "k8s": "Kubernetes",
+            "git": "Git",
+            "github": "GitHub",
+            "gitlab": "GitLab",
+            "jenkins": "Jenkins",
+            "maven": "Maven",
+            "gradle": "Gradle",
+            "spring": "Spring",
+            "springboot": "Spring Boot",
+            "spring boot": "Spring Boot",
+            "hibernate": "Hibernate",
+            "django": "Django",
+            "flask": "Flask",
+            "rails": "Ruby on Rails",
+            "ruby on rails": "Ruby on Rails",
+            "laravel": "Laravel",
+            "symfony": "Symfony",
+            "codeigniter": "CodeIgniter",
+            "express": "Express.js",
+            "express.js": "Express.js",
+            "fastapi": "FastAPI",
+            "tornado": "Tornado",
+            "pandas": "Pandas",
+            "numpy": "NumPy",
+            "scikit-learn": "Scikit-learn",
+            "sklearn": "Scikit-learn",
+            "tensorflow": "TensorFlow",
+            "pytorch": "PyTorch",
+            "keras": "Keras",
+            "opencv": "OpenCV",
+            "matplotlib": "Matplotlib",
+            "seaborn": "Seaborn",
+            "plotly": "Plotly",
+            "jupyter": "Jupyter",
+            "anaconda": "Anaconda",
+            "conda": "Conda",
+            "pip": "pip",
+            "npm": "npm",
+            "yarn": "Yarn",
+            "webpack": "Webpack",
+            "babel": "Babel",
+            "eslint": "ESLint",
+            "prettier": "Prettier",
+            "jest": "Jest",
+            "mocha": "Mocha",
+            "chai": "Chai",
+            "cypress": "Cypress",
+            "selenium": "Selenium",
+            "junit": "JUnit",
+            "testng": "TestNG",
+            "mockito": "Mockito",
+            "postman": "Postman",
+            "swagger": "Swagger",
+            "rest": "REST",
+            "restful": "RESTful",
+            "graphql": "GraphQL",
+            "soap": "SOAP",
+            "json": "JSON",
+            "xml": "XML",
+            "yaml": "YAML",
+            "yml": "YAML",
+            "html": "HTML",
+            "html5": "HTML5",
+            "css": "CSS",
+            "css3": "CSS3",
+            "sass": "Sass",
+            "scss": "SCSS",
+            "less": "Less",
+            "bootstrap": "Bootstrap",
+            "tailwind": "Tailwind CSS",
+            "tailwindcss": "Tailwind CSS",
+            "materialui": "Material-UI",
+            "material-ui": "Material-UI",
+            "mui": "Material-UI",
+            "antd": "Ant Design",
+            "ant design": "Ant Design",
+            "redux": "Redux",
+            "mobx": "MobX",
+            "vuex": "Vuex",
+            "pinia": "Pinia",
+            "nginx": "Nginx",
+            "apache": "Apache",
+            "tomcat": "Tomcat",
+            "jetty": "Jetty",
+            "iis": "IIS",
             "linux": "Linux",
-            "LINUX": "Linux",
-            "DOS": "DOS",
-            "dos": "DOS",
-            "Mac": "macOS",
-            "mac": "macOS",
-            "macOS": "macOS",
-            "MacOS": "macOS",
-            "iOS": "iOS",
+            "ubuntu": "Ubuntu",
+            "centos": "CentOS",
+            "redhat": "Red Hat",
+            "debian": "Debian",
+            "windows": "Windows",
+            "macos": "macOS",
             "ios": "iOS",
-            "Android": "Android",
             "android": "Android",
-            "ANDROID": "Android",
-            # 协作工具
+            "flutter": "Flutter",
+            "react native": "React Native",
+            "xamarin": "Xamarin",
+            "unity": "Unity",
+            "unreal": "Unreal Engine",
+            "blender": "Blender",
+            "photoshop": "Photoshop",
+            "illustrator": "Illustrator",
+            "sketch": "Sketch",
+            "figma": "Figma",
+            "xd": "Adobe XD",
+            "adobe xd": "Adobe XD",
+            "zeplin": "Zeplin",
+            "invision": "InVision",
+            "jira": "Jira",
+            "confluence": "Confluence",
+            "trello": "Trello",
+            "asana": "Asana",
             "slack": "Slack",
-            "Slack": "Slack",
-            "SLACK": "Slack",
-            "teams": "Teams",
-            "Teams": "Teams",
-            "TEAMS": "Teams",
-            "ovice": "oVice",
-            "Ovice": "oVice",
-            "oVice": "oVice",
-            # 其他工具
-            "teraterm": "TeraTerm",
-            "TeraTerm": "TeraTerm",
-            "TERATERM": "TeraTerm",
-            "Tera Term": "TeraTerm",
+            "teams": "Microsoft Teams",
+            "zoom": "Zoom",
+            "office": "Microsoft Office",
+            "excel": "Excel",
+            "word": "Word",
+            "powerpoint": "PowerPoint",
+            "outlook": "Outlook",
+            "google workspace": "Google Workspace",
+            "gsuite": "Google Workspace",
+            "gmail": "Gmail",
+            "gdrive": "Google Drive",
+            "sheets": "Google Sheets",
+            "docs": "Google Docs",
+            "slides": "Google Slides",
         }
 
-        # 检查映射
-        if skill in skill_mapping:
-            return skill_mapping[skill]
-
-        # 大小写不敏感查找
         skill_lower = skill.lower()
-        for k, v in skill_mapping.items():
-            if k.lower() == skill_lower:
-                return v
+        if skill_lower in skill_mappings:
+            return skill_mappings[skill_lower]
 
-        # 检查有效技能列表
-        for valid_skill in VALID_SKILLS:
-            if valid_skill.lower() == skill_lower:
-                return valid_skill
-
-        # 如果在no_split_skills中有对应的技能，使用标准形式
-        for no_split_skill in self.no_split_skills:
-            if skill.lower() == no_split_skill.lower():
-                return no_split_skill
+        # 保持原有格式，但首字母大写（除非已经有特定格式）
+        if skill.islower() and len(skill) > 1:
+            return skill.capitalize()
 
         return skill
 
