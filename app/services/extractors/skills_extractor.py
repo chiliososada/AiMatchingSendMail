@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""技能提取器"""
+"""技能提取器 - 修复提取范围版本"""
 
 from typing import List, Dict, Any, Tuple, Optional
 import pandas as pd
@@ -26,7 +26,6 @@ class SkillsExtractor(BaseExtractor):
             "要件定義",
             "基本设计",
             "详细设计",
-            # "No.",  # 添加 No. 作为工程阶段标题
         ]
 
         # 技术列标题关键词（用于识别技术列）
@@ -48,6 +47,7 @@ class SkillsExtractor(BaseExtractor):
 
         # 不应该被空格分割的技能（保持完整性）
         self.no_split_skills = {
+            "Spring Boot",
             "VS Code",
             "Visual Studio",
             "Android Studio",
@@ -73,7 +73,7 @@ class SkillsExtractor(BaseExtractor):
         }
 
     def extract(self, all_data: List[Dict[str, Any]]) -> List[str]:
-        """提取技能列表
+        """提取技能列表 - 限制在工程阶段关键词之下
 
         Args:
             all_data: 包含所有sheet数据的列表
@@ -90,38 +90,87 @@ class SkillsExtractor(BaseExtractor):
             print(f"\n🔍 开始技术关键字提取 - Sheet: {sheet_name}")
             print(f"    表格大小: {df.shape[0]}行 x {df.shape[1]}列")
 
-            # 主要方法：基于工程阶段列定位技术列
-            skills, design_positions = self._extract_skills_by_design_column(df)
-            if skills:
-                print(f"    ✓ 从技术列提取到 {len(skills)} 个技能")
-                all_skills.extend(skills)
+            # **关键修复：先确定工程阶段的最小行位置，只在该行之下提取技能**
+            min_design_row = self._find_min_design_row(df)
 
-            # 备用方法：如果主方法失败或提取太少
-            if len(all_skills) < 5:
-                print(f"    使用备用方法补充提取")
-                # 方法2：查找合并单元格（限制在设计行下方）
-                merged_skills = self._find_skills_in_merged_cells(df, design_positions)
-                all_skills.extend(merged_skills)
+            if min_design_row is not None:
+                print(f"    ✓ 找到工程阶段起始行: {min_design_row + 1}")
+                print(f"    📍 只提取第{min_design_row + 1}行之下的技能")
 
-                # 方法3：全文搜索（限制在设计行下方）
-                if len(all_skills) < 5:
-                    fallback_skills = self._extract_skills_fallback(
-                        df, design_positions
+                # 方法1：基于工程阶段列定位技术列（限制在项目表头之下）
+                skills, design_positions = (
+                    self._extract_skills_by_design_column_limited(df, project_start_row)
+                )
+                if skills:
+                    print(f"    ✓ 从技术列提取到 {len(skills)} 个技能")
+                    all_skills.extend(skills)
+
+                # **新增方法：横向技能表格处理（限制在项目表头之下）**
+                horizontal_skills = self._extract_skills_from_horizontal_table_limited(
+                    df, project_start_row
+                )
+                if horizontal_skills:
+                    print(f"    ✓ 从横向表格提取到 {len(horizontal_skills)} 个技能")
+                    all_skills.extend(horizontal_skills)
+
+                # 备用方法：如果主方法失败或提取太少（限制在项目表头之下）
+                if len(all_skills) < 10:
+                    print(
+                        f"    使用备用方法补充提取（限制在第{project_start_row + 1}行之下）"
+                    )
+                    fallback_skills = self._extract_skills_fallback_limited(
+                        df, project_start_row
                     )
                     all_skills.extend(fallback_skills)
+            else:
+                print("    ❌ 未找到项目表头关键词，无法确定提取范围")
+                print("    🚫 跳过该表格，不进行全表格提取")
+                # 不进行任何提取，直接跳过
 
         # 去重和标准化
         final_skills = self._process_and_deduplicate_skills(all_skills)
         return final_skills
 
-    def _extract_skills_by_design_column(
-        self, df: pd.DataFrame
+    def _find_project_start_row(self, df: pd.DataFrame) -> Optional[int]:
+        """从下往上找到项目表头行（包含項番、作業期間等的行）
+
+        Returns:
+            项目表头行号，如果没找到则返回None
+        """
+        project_header_keywords = [
+            "項番",
+            "作業期間",
+            "開発場所",
+            "言語",
+            "ツール",
+            "DB",
+        ]
+
+        # **关键修复：从下往上查找，找到第一个就停止**
+        for row in range(len(df) - 1, -1, -1):  # 从最后一行往上找
+            for col in range(len(df.columns)):
+                cell = df.iloc[row, col]
+                if pd.notna(cell):
+                    cell_str = str(cell).strip()
+                    # 检查是否包含项目表头关键词
+                    if any(keyword in cell_str for keyword in project_header_keywords):
+                        print(
+                            f"    发现项目表头: 第{row + 1}行,第{col + 1}列 = '{cell_str}'"
+                        )
+                        return row  # **找到第一个就立即返回，不再继续查找**
+
+        return None
+
+    def _extract_skills_by_design_column_limited(
+        self, df: pd.DataFrame, min_design_row: int
     ) -> Tuple[List[str], List[Dict]]:
-        """基于工程阶段列定位并提取技术列"""
+        """基于工程阶段列定位并提取技术列（限制在工程阶段之下）"""
         skills = []
 
-        # Step 1: 找到包含"基本設計"等关键词的列位置
-        design_positions = self._find_design_column_positions(df)
+        # Step 1: 找到包含"基本設計"等关键词的列位置（只在min_design_row之下搜索）
+        design_positions = self._find_design_column_positions_limited(
+            df, min_design_row
+        )
         if not design_positions:
             print("    未找到工程阶段列")
             return skills, design_positions
@@ -131,7 +180,9 @@ class SkillsExtractor(BaseExtractor):
         # Step 2: 对每个找到的设计列位置，向左查找所有技术列
         for design_pos in design_positions:
             # 找到所有技术列（不是只找一个）
-            tech_columns = self._find_all_tech_columns_left(df, design_pos)
+            tech_columns = self._find_all_tech_columns_left_limited(
+                df, design_pos, min_design_row
+            )
 
             if tech_columns:
                 print(
@@ -143,18 +194,24 @@ class SkillsExtractor(BaseExtractor):
                     print(
                         f"      提取列 {tech_column['col']} (类型: {tech_column.get('type', '未知')})"
                     )
-                    column_skills = self._extract_entire_column_skills(df, tech_column)
+                    column_skills = self._extract_entire_column_skills_limited(
+                        df, tech_column, min_design_row
+                    )
                     skills.extend(column_skills)
 
         return skills, design_positions
 
-    def _find_design_column_positions(self, df: pd.DataFrame) -> List[Dict]:
-        """查找包含工程阶段关键词的列位置"""
+    def _find_design_column_positions_limited(
+        self, df: pd.DataFrame, project_start_row: int
+    ) -> List[Dict]:
+        """查找包含工程阶段关键词的列位置（限制在project_start_row之下）"""
         positions = []
 
         # 从右向左扫描（优先查找右侧的列）
         for col in range(len(df.columns) - 1, -1, -1):
-            for row in range(len(df)):  # 搜索整个列
+            for row in range(
+                project_start_row, len(df)
+            ):  # **关键修复：只搜索project_start_row之下**
                 cell = df.iloc[row, col]
                 if pd.notna(cell):
                     cell_str = str(cell).strip()
@@ -165,23 +222,25 @@ class SkillsExtractor(BaseExtractor):
 
         return positions
 
-    def _find_all_tech_columns_left(
-        self, df: pd.DataFrame, design_pos: Dict
+    def _find_all_tech_columns_left_limited(
+        self, df: pd.DataFrame, design_pos: Dict, project_start_row: int
     ) -> List[Dict]:
-        """从设计列位置向左查找所有技术列"""
+        """从设计列位置向左查找所有技术列（限制在project_start_row之下）"""
         design_row = design_pos["row"]
         design_col = design_pos["col"]
         tech_columns = []
 
-        # 定义搜索范围：只在设计行的下方搜索
-        search_start_row = design_row  # 从设计行开始
+        # **关键修复：确保搜索范围不超过project_start_row之上**
+        search_start_row = max(design_row, project_start_row)  # 取较大值
         search_end_row = len(df)  # 搜索到表格末尾
+
+        print(f"      技能搜索范围: 第{search_start_row + 1}行 到 第{search_end_row}行")
 
         # 从设计列向左逐列搜索
         for col in range(design_col - 1, max(-1, design_col - 20), -1):
             # 检查该列是否包含技术内容
-            tech_info = self._analyze_column_for_tech(
-                df, col, search_start_row, search_end_row
+            tech_info = self._analyze_column_for_tech_limited(
+                df, col, search_start_row, search_end_row, project_start_row
             )
 
             if tech_info and tech_info["score"] >= 2:
@@ -189,18 +248,25 @@ class SkillsExtractor(BaseExtractor):
 
         return tech_columns
 
-    def _analyze_column_for_tech(
-        self, df: pd.DataFrame, col: int, start_row: int, end_row: int
+    def _analyze_column_for_tech_limited(
+        self,
+        df: pd.DataFrame,
+        col: int,
+        start_row: int,
+        end_row: int,
+        project_start_row: int,
     ) -> Optional[Dict]:
-        """分析某一列是否为技术列"""
+        """分析某一列是否为技术列（限制在project_start_row之下）"""
         tech_score = 0
         tech_row_start = None
         column_type = None
         sample_skills = []
 
         for row in range(start_row, end_row):
-            if row >= len(df):
-                break
+            if (
+                row >= len(df) or row < project_start_row
+            ):  # **关键修复：确保不超过project_start_row之上**
+                continue
 
             cell = df.iloc[row, col]
             if pd.notna(cell):
@@ -238,7 +304,9 @@ class SkillsExtractor(BaseExtractor):
         if tech_score >= 2:
             return {
                 "col": col,
-                "start_row": tech_row_start or start_row,
+                "start_row": max(
+                    tech_row_start or start_row, project_start_row
+                ),  # **确保起始行不超过project_start_row之上**
                 "score": tech_score,
                 "type": column_type or "general",
                 "sample_skills": sample_skills[:5],  # 保留前5个作为样本
@@ -246,45 +314,17 @@ class SkillsExtractor(BaseExtractor):
 
         return None
 
-    def _cell_contains_tech_content(self, cell_str: str) -> bool:
-        """检查单元格是否包含技术内容"""
-        # 快速检查常见技术关键词
-        tech_patterns = [
-            r"\b(Java|Python|JavaScript|PHP|Ruby|C\+\+|C#|Go|VB|COBOL)\b",
-            r"\b(Spring|React|Vue|Angular|Django|Rails|Node\.js|\.NET)\b",
-            r"\b(MySQL|PostgreSQL|Oracle|MongoDB|Redis|SQL\s*Server|DB2)\b",
-            r"\b(AWS|Azure|GCP|Docker|Kubernetes)\b",
-            r"\b(Git|SVN|Jenkins|Maven|TortoiseSVN|GitHub)\b",
-            r"\b(Windows|Linux|Unix|Ubuntu|CentOS|win\d+)\b",
-            r"\b(Eclipse|IntelliJ|VS\s*Code|Visual\s*Studio|NetBeans)\b",
-            r"(HTML|CSS|SQL|XML|JSON|TeraTerm)",
-        ]
-
-        cell_upper = cell_str.upper()
-        for pattern in tech_patterns:
-            if re.search(pattern, cell_str, re.IGNORECASE):
-                return True
-
-        # 检查是否包含预定义的有效技能
-        for skill in VALID_SKILLS:
-            if skill.upper() in cell_upper:
-                return True
-
-        # 特殊情况：单独的"SE"或"PG"不算技能，但在技术列中可能出现
-        if cell_str in ["SE", "PG", "PL", "PM"]:
-            return False
-
-        return False
-
-    def _extract_entire_column_skills(
-        self, df: pd.DataFrame, tech_column: Dict
+    def _extract_entire_column_skills_limited(
+        self, df: pd.DataFrame, tech_column: Dict, project_start_row: int
     ) -> List[str]:
-        """提取整个技术列的所有技能"""
+        """提取整个技术列的所有技能（限制在project_start_row之下）"""
         skills = []
         col = tech_column["col"]
-        start_row = tech_column["start_row"]
+        start_row = max(
+            tech_column["start_row"], project_start_row
+        )  # **确保起始行不超过project_start_row之上**
 
-        print(f"        从行 {start_row} 开始提取")
+        print(f"        从行 {start_row + 1} 开始提取（限制在项目表头之下）")
 
         # 提取该列从start_row开始的所有内容
         consecutive_empty = 0
@@ -319,6 +359,138 @@ class SkillsExtractor(BaseExtractor):
                     break
 
         return skills
+
+    def _extract_skills_from_horizontal_table_limited(
+        self, df: pd.DataFrame, project_start_row: int
+    ) -> List[str]:
+        """
+        处理横向多列技能表格（限制在project_start_row之下）
+        针对每行包含多个技能的布局
+        """
+        skills = []
+
+        # 技能分类关键词
+        skill_category_keywords = ["言語", "DB", "FW", "ツール", "OS", "機種"]
+
+        print(f"    使用横向表格提取方法（限制在第{project_start_row + 1}行之下）...")
+
+        # **关键修复：只查找project_start_row之下的技能相关行**
+        for row in range(project_start_row, len(df)):
+            row_data = df.iloc[row]
+
+            # 检查该行是否包含技能分类标识
+            has_skill_category = False
+            category_found = ""
+
+            for cell in row_data:
+                if pd.notna(cell):
+                    cell_str = str(cell).strip()
+                    for keyword in skill_category_keywords:
+                        if keyword in cell_str:
+                            has_skill_category = True
+                            category_found = keyword
+                            break
+                    if has_skill_category:
+                        break
+
+            if has_skill_category:
+                print(f"        处理技能行 {row + 1} ({category_found})")
+
+                # 提取该行的所有技能
+                row_skills = []
+                for col_idx, cell in enumerate(row_data):
+                    if pd.notna(cell):
+                        cell_str = str(cell).strip()
+
+                        # 跳过分类标题和评价符号
+                        if not any(
+                            keyword in cell_str for keyword in skill_category_keywords
+                        ) and cell_str not in ["◎", "○", "△", "×", ""]:
+
+                            # 处理复合技能（如"Git,GitHub"）
+                            if "," in cell_str:
+                                sub_skills = [s.strip() for s in cell_str.split(",")]
+                                for sub_skill in sub_skills:
+                                    if sub_skill and self._is_valid_skill(sub_skill):
+                                        normalized = self._normalize_skill_name(
+                                            sub_skill
+                                        )
+                                        row_skills.append(normalized)
+                            else:
+                                if self._is_valid_skill(cell_str):
+                                    normalized = self._normalize_skill_name(cell_str)
+                                    row_skills.append(normalized)
+
+                skills.extend(row_skills)
+                print(f"            提取技能: {row_skills}")
+
+        return skills
+
+    # 移除不需要的方法，因为永远不进行全表格提取
+    # def _extract_skills_from_horizontal_table(self, df: pd.DataFrame) -> List[str]:
+
+    def _extract_skills_fallback_limited(
+        self, df: pd.DataFrame, project_start_row: int
+    ) -> List[str]:
+        """全文搜索技能（最后的备用方法，限制在project_start_row之下）"""
+        skills = []
+
+        print(f"    使用备用全文搜索（限制在第{project_start_row + 1}行之下）")
+
+        # **关键修复：只将project_start_row之下的内容转换为文本**
+        text_parts = []
+        for idx in range(project_start_row, len(df)):
+            row = df.iloc[idx]
+            row_text = " ".join([str(cell) for cell in row if pd.notna(cell)])
+            if row_text.strip():
+                text_parts.append(row_text)
+
+        text = "\n".join(text_parts)
+
+        for skill in VALID_SKILLS:
+            patterns = [
+                rf"\b{re.escape(skill)}\b",
+                rf"(?:^|\s|[、,，/]){re.escape(skill)}(?:$|\s|[、,，/])",
+            ]
+
+            for pattern in patterns:
+                if re.search(pattern, text, re.IGNORECASE):
+                    skills.append(skill)
+                    break
+
+        return skills
+
+    # 以下方法保持不变，但添加必要的修复...
+
+    def _cell_contains_tech_content(self, cell_str: str) -> bool:
+        """检查单元格是否包含技术内容"""
+        # 快速检查常见技术关键词
+        tech_patterns = [
+            r"\b(Java|Python|JavaScript|PHP|Ruby|C\+\+|C#|Go|VB|COBOL)\b",
+            r"\b(Spring|React|Vue|Angular|Django|Rails|Node\.js|\.NET)\b",
+            r"\b(MySQL|PostgreSQL|Oracle|MongoDB|Redis|SQL\s*Server|DB2)\b",
+            r"\b(AWS|Azure|GCP|Docker|Kubernetes)\b",
+            r"\b(Git|SVN|Jenkins|Maven|TortoiseSVN|GitHub)\b",
+            r"\b(Windows|Linux|Unix|Ubuntu|CentOS|win\d+)\b",
+            r"\b(Eclipse|IntelliJ|VS\s*Code|Visual\s*Studio|NetBeans)\b",
+            r"(HTML|CSS|SQL|XML|JSON|TeraTerm)",
+        ]
+
+        cell_upper = cell_str.upper()
+        for pattern in tech_patterns:
+            if re.search(pattern, cell_str, re.IGNORECASE):
+                return True
+
+        # 检查是否包含预定义的有效技能
+        for skill in VALID_SKILLS:
+            if skill.upper() in cell_upper:
+                return True
+
+        # 特殊情况：单独的"SE"或"PG"不算技能，但在技术列中可能出现
+        if cell_str in ["SE", "PG", "PL", "PM"]:
+            return False
+
+        return False
 
     def _is_column_end(self, cell_str: str) -> bool:
         """判断是否到达技术列结束"""
@@ -437,82 +609,27 @@ class SkillsExtractor(BaseExtractor):
 
         return skills
 
-    def _find_skills_in_merged_cells(
-        self, df: pd.DataFrame, design_positions: List[Dict]
-    ) -> List[str]:
-        """查找合并单元格中的技能（备用方法）"""
-        skills = []
-
-        # 获取最早的设计行位置（如果有的话）
-        min_design_row = 0
-        if design_positions:
-            min_design_row = min(pos["row"] for pos in design_positions)
-
-        for row in range(min_design_row, len(df)):  # 只搜索设计行下方
-            for col in range(len(df.columns)):
-                cell = df.iloc[row, col]
-                if pd.notna(cell) and "\n" in str(cell):
-                    cell_str = str(cell)
-                    lines = cell_str.split("\n")
-
-                    # 计算包含技能的行数
-                    skill_count = 0
-                    for line in lines:
-                        if self._cell_contains_tech_content(line):
-                            skill_count += 1
-
-                    # 如果多行包含技能，提取所有
-                    if skill_count >= 3:
-                        for line in lines:
-                            line_skills = self._extract_skills_from_text(line)
-                            skills.extend(line_skills)
-
-        return skills
-
-    def _extract_skills_fallback(
-        self, df: pd.DataFrame, design_positions: List[Dict]
-    ) -> List[str]:
-        """全文搜索技能（最后的备用方法）"""
-        skills = []
-
-        # 只搜索设计行下方的文本
-        min_design_row = 0
-        if design_positions:
-            min_design_row = min(pos["row"] for pos in design_positions)
-
-        # 只将设计行下方的内容转换为文本
-        text_parts = []
-        for idx in range(min_design_row, len(df)):
-            row = df.iloc[idx]
-            row_text = " ".join([str(cell) for cell in row if pd.notna(cell)])
-            if row_text.strip():
-                text_parts.append(row_text)
-
-        text = "\n".join(text_parts)
-
-        for skill in VALID_SKILLS:
-            patterns = [
-                rf"\b{re.escape(skill)}\b",
-                rf"(?:^|\s|[、,，/]){re.escape(skill)}(?:$|\s|[、,，/])",
-            ]
-
-            for pattern in patterns:
-                if re.search(pattern, text, re.IGNORECASE):
-                    skills.append(skill)
-                    break
-
-        return skills
-
     def _is_valid_skill(self, skill: str) -> bool:
-        """验证是否为有效技能"""
+        """验证是否为有效技能 - 修复版本"""
         if not skill or len(skill) < 1 or len(skill) > 50:
             return False
 
         skill = skill.strip()
 
-        # 新增：排除包含 "os" 或 "db" 关键字的技能（不区分大小写）
+        # **修复：排除占位符**
+        if "__SKILL_PLACEHOLDER_" in skill:
+            return False
+
+        # **修复：不再直接排除包含"os"或"db"的技能**
+        # 而是更精确地排除
         skill_lower = skill.lower()
-        if "os" in skill_lower or "db" in skill_lower:
+
+        # 只排除明确的非技能内容，而不是包含os/db的所有内容
+        if skill_lower in ["os", "db"]:  # 只排除单独的"os"和"db"
+            return False
+
+        # 排除包含"数据库"、"操作系统"等完整词汇的描述性文本
+        if any(word in skill for word in ["数据库", "操作系统", "データベース"]):
             return False
 
         # 排除包含括号的技能（半角和全角）
@@ -546,9 +663,18 @@ class SkillsExtractor(BaseExtractor):
         if any(keyword in skill for keyword in exclude_japanese_keywords):
             return False
 
+        # 排除评价符号
+        if skill in ["◎", "○", "△", "×", ""]:
+            return False
+
         # 排除模式
-        for pattern in EXCLUDE_PATTERNS:
-            if re.match(pattern, skill, re.IGNORECASE):
+        exclude_patterns = [
+            r"^[0-9\s\.\-]+$",  # 纯数字
+            r"^[◎○△×\s]+$",  # 评价符号
+        ]
+
+        for pattern in exclude_patterns:
+            if re.match(pattern, skill):
                 return False
 
         # 特殊情况
@@ -590,8 +716,9 @@ class SkillsExtractor(BaseExtractor):
         return False
 
     def _normalize_skill_name(self, skill: str) -> str:
-        """标准化技能名称"""
+        """标准化技能名称 - 增强版本"""
         skill = skill.strip()
+
         # 处理冒号分隔的情况（支持全角和半角冒号）
         # 例如: "言語:Java" -> "Java", "DB：PostgreSQL" -> "PostgreSQL"
         if ":" in skill or "：" in skill:
@@ -613,7 +740,7 @@ class SkillsExtractor(BaseExtractor):
         if "linux" in skill.lower():
             return "Linux"
 
-        # 技能名称映射
+        # **增强的技能名称映射**
         skill_mapping = {
             # 编程语言
             "JAVA": "Java",
@@ -625,80 +752,185 @@ class SkillsExtractor(BaseExtractor):
             "TYPESCRIPT": "TypeScript",
             "python": "Python",
             "PYTHON": "Python",
+            "C#": "C#",
+            "c#": "C#",
+            "C++": "C++",
+            "c++": "C++",
+            "C": "C",
+            "c": "C",
+            "PHP": "PHP",
+            "php": "PHP",
+            "Ruby": "Ruby",
+            "ruby": "Ruby",
+            "GO": "Go",
+            "go": "Go",
+            "VB．NET": "VB.NET",
+            "VB.NET": "VB.NET",
+            "ASP．NET": "ASP.NET",
+            "ASP.NET": "ASP.NET",
+            "COBOL": "COBOL",
+            "cobol": "COBOL",
+            "Groovy": "Groovy",
+            "groovy": "Groovy",
+            "Objective-C": "Objective-C",
+            "objective-c": "Objective-C",
+            "Swift": "Swift",
+            "swift": "Swift",
+            "Kotlin": "Kotlin",
+            "kotlin": "Kotlin",
+            "HTML5": "HTML5",
+            "html5": "HTML5",
+            "HTML": "HTML",
+            "html": "HTML",
+            "CSS": "CSS",
+            "css": "CSS",
             # 数据库
             "MySql": "MySQL",
             "mysql": "MySQL",
+            "MYSQL": "MySQL",
             "mybatis": "MyBatis",
             "Mybatis": "MyBatis",
             "MYBATIS": "MyBatis",
             "PostgreSQL": "PostgreSQL",
             "Postgre SQL": "PostgreSQL",
+            "postgresql": "PostgreSQL",
             "SqlServer": "SQL Server",
             "SQLServer": "SQL Server",
             "sqlserver": "SQL Server",
             "SQL SERVER": "SQL Server",
+            "ORACLE": "Oracle",
+            "oracle": "Oracle",
+            "Oracle": "Oracle",
+            "DB2": "DB2",
+            "db2": "DB2",
+            "ACCESS": "Access",
+            "access": "Access",
+            "Access": "Access",
+            "ADABAS": "ADABAS",
+            "adabas": "ADABAS",
+            "HIRDB": "HiRDB",
+            "hirdb": "HiRDB",
             # 框架
             "spring": "Spring",
-            "springboot": "SpringBoot",
-            "SpringBoot": "SpringBoot",
+            "Spring": "Spring",
+            "SPRING": "Spring",
+            "spring boot": "Spring Boot",
+            "springboot": "Spring Boot",
+            "spring-boot": "Spring Boot",
+            "SPRING BOOT": "Spring Boot",
+            "SpringBoot": "Spring Boot",  # **重要：处理这个变体**
+            "SpringMVC": "Spring MVC",
+            "springmvc": "Spring MVC",
+            "Struts1.0": "Struts 1.0",
+            "struts1.0": "Struts 1.0",
+            "Struts2.0": "Struts 2.0",
+            "struts2.0": "Struts 2.0",
+            "thymeleaf": "Thymeleaf",
+            "Thymeleaf": "Thymeleaf",
+            "THYMELEAF": "Thymeleaf",
+            "Angular": "Angular",
+            "angular": "Angular",
+            "ANGULAR": "Angular",
+            "AngularJS": "AngularJS",
+            "angularjs": "AngularJS",
+            "ANGULARJS": "AngularJS",
+            "jQuery": "jQuery",
+            "jquery": "jQuery",
+            "JQUERY": "jQuery",
             "node.js": "Node.js",
             "Node.JS": "Node.js",
             "nodejs": "Node.js",
-            "vue.js": "Vue",
+            "NODE.JS": "Node.js",
+            "vue.js": "Vue.js",
+            "Vue.js": "Vue.js",
+            "vuejs": "Vue.js",
+            "VUE.JS": "Vue.js",
             "react.js": "React",
-            "thymeleaf": "Thymeleaf",
+            "React.js": "React",
+            "reactjs": "React",
+            "REACT.JS": "React",
+            "JSF": "JSF",
+            "jsf": "JSF",
+            "BackBone.js": "Backbone.js",
+            "backbone.js": "Backbone.js",
+            # 测试和构建工具
+            "junit": "JUnit",
+            "Junit": "JUnit",
+            "JUNIT": "JUnit",
+            "Spock": "Spock",
+            "spock": "Spock",
+            "Jmeter": "JMeter",
+            "jmeter": "JMeter",
+            "JMETER": "JMeter",
+            "A5M2": "A5:SQL Mk-2",
+            "a5m2": "A5:SQL Mk-2",
             # IDE和工具
             "eclipse": "Eclipse",
-            "eclipes": "Eclipse",  # 常见拼写错误
+            "Eclipse": "Eclipse",
             "ECLIPSE": "Eclipse",
             "vscode": "VS Code",
             "Vscode": "VS Code",
             "VSCode": "VS Code",
-            "VScode": "VS Code",
             "VS Code": "VS Code",
-            "VS code": "VS Code",
             "vs code": "VS Code",
+            "VS code": "VS Code",
             "Visual Studio Code": "VS Code",
-            "junit": "JUnit",
-            "Junit": "JUnit",
-            "JUNIT": "JUnit",
+            "Visual Studio": "Visual Studio",
+            "visual studio": "Visual Studio",
+            "Intellij": "IntelliJ IDEA",
+            "intellij": "IntelliJ IDEA",
+            "IntelliJ": "IntelliJ IDEA",
+            "postman": "Postman",
+            "Postman": "Postman",
+            "POSTMAN": "Postman",
+            "WinMerge": "WinMerge",
+            "winmerge": "WinMerge",
+            "WINMERGE": "WinMerge",
+            # 版本控制
+            "git": "Git",
+            "Git": "Git",
+            "GIT": "Git",
             "github": "GitHub",
+            "Github": "GitHub",
             "GITHUB": "GitHub",
             "svn": "SVN",
             "Svn": "SVN",
+            "SVN": "SVN",
             "TortoiseSVN": "TortoiseSVN",
-            "Tortoise SVN": "TortoiseSVN",
-            "winmerge": "WinMerge",
-            "WINMERGE": "WinMerge",
-            "teraterm": "TeraTerm",
-            "TERATERM": "TeraTerm",
-            "Tera Term": "TeraTerm",
-            # 协作工具
-            "slack": "Slack",
-            "SLACK": "Slack",
-            "teams": "Teams",
-            "TEAMS": "Teams",
-            "ovice": "oVice",
-            "Ovice": "oVice",
+            "tortoisesvn": "TortoiseSVN",
             # 云服务
             "aws": "AWS",
             "Aws": "AWS",
+            "AWS": "AWS",
             "azure": "Azure",
+            "Azure": "Azure",
             "AZURE": "Azure",
-            "Azure SQL DB": "Azure SQL Database",
-            # AWS服务标准化
-            "glue": "AWS Glue",
-            "S3": "AWS S3",
-            "Lambda": "AWS Lambda",
-            "EC2": "AWS EC2",
-            "IAM": "AWS IAM",
-            "codecommit": "AWS CodeCommit",
-            # 其他
-            "dynamics365": "Dynamics 365",
-            "Dynamics365": "Dynamics 365",
-            "FO": "Finance and Operations",
-            "JP1": "JP1",
-            "jp1": "JP1",
+            "SalseForce": "Salesforce",
+            "salesforce": "Salesforce",
+            "Salesforce": "Salesforce",
+            "OutSystems": "OutSystems",
+            "outsystems": "OutSystems",
+            # 操作系统
+            "Solris": "Solaris",
+            "solaris": "Solaris",
+            "Solaris": "Solaris",
+            "UNIX": "Unix",
+            "unix": "Unix",
+            "Unix": "Unix",
+            "Linux": "Linux",
+            "linux": "Linux",
+            "LINUX": "Linux",
+            "DOS": "DOS",
+            "dos": "DOS",
+            "Mac": "macOS",
+            "mac": "macOS",
+            "macOS": "macOS",
+            "MacOS": "macOS",
+            "iOS": "iOS",
+            "ios": "iOS",
+            "Android": "Android",
+            "android": "Android",
+            "ANDROID": "Android",
         }
 
         # 检查映射
@@ -715,6 +947,11 @@ class SkillsExtractor(BaseExtractor):
         for valid_skill in VALID_SKILLS:
             if valid_skill.lower() == skill_lower:
                 return valid_skill
+
+        # 如果在no_split_skills中有对应的技能，使用标准形式
+        for no_split_skill in self.no_split_skills:
+            if skill.lower() == no_split_skill.lower():
+                return no_split_skill
 
         return skill
 
