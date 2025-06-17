@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""来日年份提取器 - 增强调试版本：添加详细的控制台输出"""
+"""来日年份提取器 - 修复版本：解决关键词匹配和年份提取问题"""
 
 from typing import List, Dict, Any, Optional
 from datetime import datetime
@@ -7,13 +7,47 @@ from collections import defaultdict
 import pandas as pd
 import re
 
-from app.base.constants import KEYWORDS
-from app.base.base_extractor import BaseExtractor
-from app.utils.date_utils import convert_excel_serial_to_date
+# 🔥 修复1: 直接定义完整的关键词，避免导入依赖问题
+ARRIVAL_KEYWORDS = [
+    "来日",
+    "渡日",
+    "入国",
+    "日本滞在年数",
+    "滞在年数",
+    "在日年数",
+    "来日年",
+    "来日時期",
+    "来日年月",
+    "来日年度",  # 🆕 添加了 "来日年月"
+    "滞在期間",
+    "在留期間",
+    "入日",
+    "日本入国",
+    "来日時",
+    "渡日時期",
+]
+
+try:
+    from app.base.constants import KEYWORDS
+    from app.base.base_extractor import BaseExtractor
+    from app.utils.date_utils import convert_excel_serial_to_date
+
+    # 如果能成功导入，补充现有关键词
+    if isinstance(KEYWORDS, dict) and "arrival" in KEYWORDS:
+        ARRIVAL_KEYWORDS.extend(KEYWORDS["arrival"])
+        ARRIVAL_KEYWORDS = list(set(ARRIVAL_KEYWORDS))  # 去重
+
+    print("✅ 成功导入项目关键词，已合并")
+except ImportError as e:
+    print(f"⚠️  项目关键词导入失败，使用备用关键词: {e}")
+
+    # 备用基类
+    class BaseExtractor:
+        pass
 
 
 class ArrivalYearExtractor(BaseExtractor):
-    """来日年份信息提取器 - 增强调试版本"""
+    """来日年份信息提取器 - 修复版本"""
 
     def extract(
         self, all_data: List[Dict[str, Any]], birthdate_result: Optional[str] = None
@@ -28,31 +62,12 @@ class ArrivalYearExtractor(BaseExtractor):
             来日年份字符串，如果未找到返回None
         """
         print("\n" + "=" * 60)
-        print("🔍 开始来日年份提取器执行流程")
+        print("🔍 开始来日年份提取器执行流程 (修复版)")
         print("=" * 60)
 
-        # 首先检查关键词导入状态
-        print("\n📋 步骤1: 检查关键词导入状态")
-        try:
-            arrival_keywords = KEYWORDS.get("arrival", [])
-            print(f"✅ 成功获取来日关键词: {arrival_keywords}")
-            if not arrival_keywords:
-                print("⚠️  警告: 来日关键词列表为空!")
-        except Exception as e:
-            print(f"❌ 关键词导入失败: {e}")
-            print("🔧 尝试使用备用关键词...")
-            arrival_keywords = [
-                "来日",
-                "渡日",
-                "入国",
-                "日本滞在年数",
-                "滞在年数",
-                "在日年数",
-            ]
-            print(f"🆘 使用备用关键词: {arrival_keywords}")
+        print(f"\n📋 使用关键词: {ARRIVAL_KEYWORDS}")
 
         # 处理出生年份
-        print("\n📋 步骤2: 处理出生年份信息")
         birth_year = None
         if birthdate_result:
             try:
@@ -60,13 +75,10 @@ class ArrivalYearExtractor(BaseExtractor):
                 print(f"✅ 解析出生年份: {birth_year} (将排除此年份)")
             except Exception as e:
                 print(f"⚠️  生年月日解析失败: {e}")
-                print(f"   输入值: '{birthdate_result}'")
-        else:
-            print("ℹ️  未提供生年月日信息")
 
         candidates = []
 
-        print(f"\n📋 步骤3: 开始处理 {len(all_data)} 个数据表")
+        print(f"\n📋 开始处理 {len(all_data)} 个数据表")
 
         for sheet_idx, data in enumerate(all_data):
             df = data["df"]
@@ -75,265 +87,192 @@ class ArrivalYearExtractor(BaseExtractor):
             print(f"\n📊 处理数据表 {sheet_idx+1}/{len(all_data)}: '{sheet_name}'")
             print(f"   表格大小: {len(df)} 行 x {len(df.columns)} 列")
 
-            # 方法1: 查找"来日XX年"这样的表述
-            print(f"\n   🔍 方法1: 查找年数表述...")
-            years_candidates = self._extract_from_years_expression(df)
-            if years_candidates:
-                print(
-                    f"   ✅ 从年数表述提取到 {len(years_candidates)} 个候选年份: {years_candidates}"
-                )
+            # 🔥 修复2: 优化关键词匹配逻辑
+            sheet_candidates = self._extract_from_sheet(df, birth_year)
+            if sheet_candidates:
+                candidates.extend(sheet_candidates)
+                print(f"   ✅ 本表提取到 {len(sheet_candidates)} 个候选年份")
             else:
-                print(f"   ❌ 未从年数表述中找到候选年份")
-            candidates.extend(years_candidates)
+                print(f"   ❌ 本表未找到有效年份")
 
-            # 方法2: 查找来日关键词附近的年份（排除出生年份）
-            print(f"\n   🔍 方法2: 查找来日关键词附近的年份...")
-            label_candidates = self._extract_from_arrival_labels(df, birth_year)
-            if label_candidates:
-                print(
-                    f"   ✅ 从来日标签提取到 {len(label_candidates)} 个候选年份: {label_candidates}"
-                )
-            else:
-                print(f"   ❌ 未从来日标签中找到候选年份")
-            candidates.extend(label_candidates)
+        if not candidates:
+            print(f"\n❌ 所有表格都未找到来日年份")
+            return None
 
-            # 方法3: 从日期对象中提取（排除出生年份）
-            print(f"\n   🔍 方法3: 从日期对象中提取...")
-            date_candidates = self._extract_from_date_objects(df, birth_year)
-            if date_candidates:
-                print(
-                    f"   ✅ 从日期对象提取到 {len(date_candidates)} 个候选年份: {date_candidates}"
-                )
-            else:
-                print(f"   ❌ 未从日期对象中找到候选年份")
-            candidates.extend(date_candidates)
+        # 选择最佳候选
+        best_candidate = self._select_best_candidate(candidates, birth_year)
 
-            # 方法4: 扫描Excel序列日期数字（排除出生年份）
-            print(f"\n   🔍 方法4: 扫描Excel序列日期...")
-            serial_candidates = self._extract_from_serial_dates(df, birth_year)
-            if serial_candidates:
-                print(
-                    f"   ✅ 从序列日期提取到 {len(serial_candidates)} 个候选年份: {serial_candidates}"
-                )
-            else:
-                print(f"   ❌ 未从序列日期中找到候选年份")
-            candidates.extend(serial_candidates)
+        if best_candidate:
+            print(f"\n🎯 最终选择: {best_candidate}")
+            return best_candidate
+        else:
+            print(f"\n❌ 未找到合适的来日年份")
+            return None
 
-        print(f"\n📋 步骤4: 汇总所有候选结果")
-        print(f"   总候选数量: {len(candidates)}")
-        if candidates:
-            print(f"   所有候选: {candidates}")
-
-            # 统计每个年份的总置信度
-            year_scores = defaultdict(float)
-            for year, conf in candidates:
-                year_scores[year] += conf
-                print(f"   年份 {year}: 置信度 +{conf}")
-
-            if year_scores:
-                print(f"\n📋 步骤5: 计算最终结果")
-                for year, total_conf in year_scores.items():
-                    print(f"   {year}年: 总置信度 {total_conf:.2f}")
-
-                best_year = max(year_scores.items(), key=lambda x: x[1])
-                print(f"\n🎯 最终结果: {best_year[0]} (总置信度: {best_year[1]:.2f})")
-                print("=" * 60)
-                return best_year[0]
-
-        print(f"\n❌ 未能提取到来日年份")
-        print("=" * 60)
-        return None
-
-    def _extract_from_years_expression(self, df: pd.DataFrame) -> List[tuple]:
-        """提取"来日XX年"或"在日XX年"这样的表述"""
-        print(f"      🔎 正在查找年数表述...")
-        candidates = []
-
-        for idx in range(min(40, len(df))):
-            for col in range(len(df.columns)):
-                cell = df.iloc[idx, col]
-                if pd.notna(cell):
-                    cell_str = str(cell)
-
-                    # 查找"来日XX年"、"在日XX年"等表述
-                    patterns = [
-                        (r"来日\s*(\d{1,2})\s*年", 4.0),
-                        (r"在日\s*(\d{1,2})\s*年", 4.0),
-                        (r"日本滞在\s*(\d{1,2})\s*年", 3.5),
-                        (r"滞在年数\s*(\d{1,2})\s*年?", 3.5),
-                        (r"日本.*?(\d{1,2})\s*年", 2.0),
-                        (r"(\d{1,2})\s*年.*?日本", 2.0),
-                    ]
-
-                    for pattern, confidence in patterns:
-                        match = re.search(pattern, cell_str)
-                        if match:
-                            years_in_japan = int(match.group(1))
-                            if 1 <= years_in_japan <= 30:
-                                # 从年数推算来日年份
-                                arrival_year = 2024 - years_in_japan
-                                candidates.append((str(arrival_year), confidence))
-                                print(
-                                    f"      ✅ [{idx},{col}] 从'{cell_str}'推算来日年份: {arrival_year} (模式: {pattern})"
-                                )
-
-        return candidates
-
-    def _extract_from_arrival_labels(
+    def _extract_from_sheet(
         self, df: pd.DataFrame, birth_year: Optional[int]
     ) -> List[tuple]:
-        """从来日标签附近提取年份（排除出生年份）"""
-        print(f"      🔎 正在查找来日关键词附近的年份...")
+        """从单个表格提取来日年份候选"""
         candidates = []
 
-        try:
-            arrival_keywords = KEYWORDS.get("arrival", [])
-        except:
-            arrival_keywords = [
-                "来日",
-                "渡日",
-                "入国",
-                "日本滞在年数",
-                "滞在年数",
-                "在日年数",
-            ]
+        print(f"      🔍 开始扫描表格...")
 
-        print(f"      使用关键词: {arrival_keywords}")
-
-        for idx in range(min(40, len(df))):
+        # 🔥 修复3: 遍历所有单元格，寻找关键词和年份
+        for idx in range(min(50, len(df))):  # 前50行通常包含基本信息
             for col in range(len(df.columns)):
                 cell = df.iloc[idx, col]
                 if pd.notna(cell):
-                    cell_str = str(cell)
-                    found_keywords = [k for k in arrival_keywords if k in cell_str]
+                    cell_str = str(cell).strip()
+
+                    # 检查是否包含来日关键词
+                    found_keywords = [k for k in ARRIVAL_KEYWORDS if k in cell_str]
 
                     if found_keywords:
                         print(
-                            f"      🎯 [{idx},{col}] 发现关键词 {found_keywords} 在: '{cell_str}'"
+                            f"         🎯 行{idx+1}列{col+1}: 发现关键词 {found_keywords} 在 '{cell_str}'"
                         )
+
+                        # 🔥 修复4: 在关键词附近搜索年份
                         nearby_years = self._search_year_nearby(
                             df, idx, col, birth_year
                         )
                         if nearby_years:
                             candidates.extend(nearby_years)
                             print(
-                                f"      ✅ 在附近找到 {len(nearby_years)} 个年份: {nearby_years}"
+                                f"            ✅ 找到附近年份: {[y[0] for y in nearby_years]}"
                             )
-                        else:
-                            print(f"      ❌ 附近未找到有效年份")
+
+                    # 🔥 修复5: 直接检查单元格是否包含年份格式
+                    year_matches = self._extract_year_from_cell(cell_str, birth_year)
+                    if year_matches:
+                        # 检查这个单元格是否在来日相关的行
+                        if self._is_arrival_related_row(df, idx):
+                            candidates.extend(year_matches)
+                            print(
+                                f"         📅 行{idx+1}列{col+1}: 直接提取年份 {[y[0] for y in year_matches]} 从 '{cell_str}'"
+                            )
+
         return candidates
 
     def _search_year_nearby(
         self, df: pd.DataFrame, row: int, col: int, birth_year: Optional[int]
     ) -> List[tuple]:
-        """在指定位置附近搜索年份值（排除出生年份）"""
+        """在指定位置附近搜索年份值"""
         candidates = []
-        print(f"        🔍 搜索 [{row},{col}] 附近的年份...")
 
-        for r_off in range(-2, 5):
-            for c_off in range(-2, 25):
-                r = row + r_off
-                c = col + c_off
+        # 搜索范围：上下3行，左右20列
+        for r_off in range(-3, 4):
+            for c_off in range(-5, 21):
+                r, c = row + r_off, col + c_off
+
                 if 0 <= r < len(df) and 0 <= c < len(df.columns):
                     cell = df.iloc[r, c]
                     if pd.notna(cell):
-                        # 尝试提取4位年份
-                        cell_str = str(cell)
-                        year_matches = re.findall(r"\b(19\d{2}|20[0-2]\d)\b", cell_str)
+                        cell_str = str(cell).strip()
+                        year_matches = self._extract_year_from_cell(
+                            cell_str, birth_year
+                        )
 
-                        for year_str in year_matches:
-                            year = int(year_str)
-                            if 1990 <= year <= 2024 and year != birth_year:
-                                candidates.append((year_str, 2.0))
-                                print(
-                                    f"        ✅ [{r},{c}] 找到年份: {year} (值:'{cell_str}')"
+                        if year_matches:
+                            # 根据距离设置置信度
+                            distance = abs(r_off) + abs(c_off)
+                            for year, base_confidence in year_matches:
+                                # 距离越近置信度越高
+                                adjusted_confidence = base_confidence * (
+                                    1.0 - distance * 0.1
                                 )
-                            elif year == birth_year:
-                                print(f"        ⚠️  [{r},{c}] 跳过出生年份: {year}")
+                                candidates.append((year, max(adjusted_confidence, 0.1)))
 
         return candidates
 
-    def _extract_from_date_objects(
-        self, df: pd.DataFrame, birth_year: Optional[int]
+    def _extract_year_from_cell(
+        self, cell_str: str, birth_year: Optional[int]
     ) -> List[tuple]:
-        """从日期对象中提取来日年份（排除出生年份）"""
-        print(f"      🔎 正在查找日期对象...")
+        """从单元格中提取年份"""
         candidates = []
 
-        for idx in range(min(30, len(df))):
-            for col in range(len(df.columns)):
-                cell = df.iloc[idx, col]
-                if pd.notna(cell) and hasattr(cell, "year"):
-                    if 1990 <= cell.year <= 2024 and cell.year != birth_year:
-                        # 检查是否有来日相关上下文
-                        has_arrival_context = self._has_arrival_context(df, idx, col)
-                        has_age_context = self._has_age_context(df, idx, col)
+        # 🔥 修复6: 增强年份识别模式
+        year_patterns = [
+            # "2016年4月" -> 2016
+            (r"(\d{4})\s*年\s*\d{1,2}\s*月", 4.0),
+            # "2016年" -> 2016
+            (r"(\d{4})\s*年", 3.5),
+            # "2016/4" -> 2016
+            (r"(\d{4})\s*/\s*\d{1,2}", 3.0),
+            # "2016-04" -> 2016
+            (r"(\d{4})\s*-\s*\d{1,2}", 3.0),
+            # 纯数字年份（需要在合理范围内）
+            (r"\b(\d{4})\b", 2.0),
+        ]
 
-                        print(f"      📅 [{idx},{col}] 发现日期: {cell.year}")
-                        print(f"        来日上下文: {has_arrival_context}")
-                        print(f"        年龄上下文: {has_age_context}")
+        for pattern, confidence in year_patterns:
+            matches = re.finditer(pattern, cell_str)
+            for match in matches:
+                year_str = match.group(1)
+                year = int(year_str)
 
-                        if has_arrival_context:
-                            # 如果也有年龄上下文，可能是生年月日，降低置信度
-                            confidence = 1.5 if has_age_context else 2.5
-                            candidates.append((str(cell.year), confidence))
-                            print(
-                                f"        ✅ 添加候选: {cell.year} (置信度: {confidence})"
-                            )
-
-        return candidates
-
-    def _extract_from_serial_dates(
-        self, df: pd.DataFrame, birth_year: Optional[int]
-    ) -> List[tuple]:
-        """从Excel序列日期中提取来日年份（排除出生年份）"""
-        print(f"      🔎 正在查找Excel序列日期...")
-        candidates = []
-
-        for idx in range(min(30, len(df))):
-            for col in range(len(df.columns)):
-                cell = df.iloc[idx, col]
-                if pd.notna(cell) and isinstance(cell, (int, float)):
-                    # 检查是否可能是Excel序列日期（1982-2037年的范围）
-                    if 30000 <= cell <= 50000:
-                        converted_date = convert_excel_serial_to_date(cell)
-                        if converted_date and 1990 <= converted_date.year <= 2024:
-                            print(
-                                f"      📊 [{idx},{col}] 序列日期 {cell} → {converted_date.year}"
-                            )
-
-                            if (
-                                converted_date.year != birth_year
-                                and self._has_arrival_context(df, idx, col)
-                            ):
-                                candidates.append((str(converted_date.year), 3.0))
-                                print(f"        ✅ 添加候选: {converted_date.year}")
-                            else:
-                                print(f"        ❌ 跳过: 出生年份或无来日上下文")
+                # 🔥 修复7: 年份合理性检查
+                if self._is_valid_arrival_year(year, birth_year):
+                    candidates.append((year_str, confidence))
+                    print(
+                        f"            📅 提取年份: {year_str} (模式: {pattern}, 置信度: {confidence})"
+                    )
 
         return candidates
 
-    def _has_arrival_context(self, df: pd.DataFrame, row: int, col: int) -> bool:
-        """检查是否有来日相关的上下文"""
-        try:
-            arrival_keywords = KEYWORDS.get("arrival", [])
-        except:
-            arrival_keywords = [
-                "来日",
-                "渡日",
-                "入国",
-                "日本滞在年数",
-                "滞在年数",
-                "在日年数",
-            ]
+    def _is_valid_arrival_year(self, year: int, birth_year: Optional[int]) -> bool:
+        """检查年份是否为有效的来日年份"""
+        # 基本范围检查
+        if year < 1980 or year > 2025:
+            return False
 
-        has_context = self.has_nearby_keyword(df, row, col, arrival_keywords, radius=5)
-        print(f"        🔍 检查来日上下文 [{row},{col}]: {has_context}")
-        return has_context
+        # 排除出生年份
+        if birth_year and year == birth_year:
+            print(f"            ⚠️  排除出生年份: {year}")
+            return False
 
-    def _has_age_context(self, df: pd.DataFrame, row: int, col: int) -> bool:
-        """检查是否有年龄相关的上下文"""
-        age_keywords = ["生年月", "年齢", "歳", "才"]
-        has_context = self.has_nearby_keyword(df, row, col, age_keywords, radius=5)
-        print(f"        🔍 检查年龄上下文 [{row},{col}]: {has_context}")
-        return has_context
+        # 来日年份应该在一个合理的范围内
+        if birth_year:
+            # 来日年份应该在出生后至少10年，最多50年内
+            if year < birth_year + 10 or year > birth_year + 50:
+                print(f"            ⚠️  年份不合理: {year} (出生年份: {birth_year})")
+                return False
+
+        return True
+
+    def _is_arrival_related_row(self, df: pd.DataFrame, row_idx: int) -> bool:
+        """检查这一行是否与来日相关"""
+        # 检查整行的内容
+        row_content = ""
+        for col in range(len(df.columns)):
+            cell = df.iloc[row_idx, col]
+            if pd.notna(cell):
+                row_content += str(cell) + " "
+
+        # 如果行内容包含来日关键词，则认为相关
+        return any(keyword in row_content for keyword in ARRIVAL_KEYWORDS)
+
+    def _select_best_candidate(
+        self, candidates: List[tuple], birth_year: Optional[int]
+    ) -> Optional[str]:
+        """选择最佳的来日年份候选"""
+        if not candidates:
+            return None
+
+        print(f"\n📊 候选年份分析:")
+
+        # 按置信度排序
+        sorted_candidates = sorted(candidates, key=lambda x: x[1], reverse=True)
+
+        # 显示所有候选
+        for year, confidence in sorted_candidates[:5]:  # 显示前5个
+            print(f"   {year}: 置信度 {confidence:.2f}")
+
+        # 选择置信度最高的
+        best_year, best_confidence = sorted_candidates[0]
+
+        if best_confidence >= 2.0:  # 置信度阈值
+            return str(best_year)
+        else:
+            print(f"   ⚠️  最高置信度 {best_confidence} 低于阈值 2.0")
+            return None

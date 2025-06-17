@@ -1,19 +1,31 @@
 # -*- coding: utf-8 -*-
-"""日语水平提取器 - 修复版：支持更多格式包括'N1かなり流暢'"""
+"""日语水平提取器 - 优先级优化版：N1/N2等级优先，其次描述性等级"""
 
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 import pandas as pd
 import re
 
-from app.base.constants import KEYWORDS
-from app.base.base_extractor import BaseExtractor
+try:
+    from app.base.constants import KEYWORDS
+    from app.base.base_extractor import BaseExtractor
+except ImportError:
+    # 备用定义
+    KEYWORDS = {"japanese": ["日本語", "JLPT", "日語", "語学力"]}
+
+    class BaseExtractor:
+        def __init__(self):
+            self.trans_table = str.maketrans("０１２３４５６７８９", "0123456789")
 
 
 class JapaneseLevelExtractor(BaseExtractor):
-    """日语水平信息提取器 - 修复版"""
+    """日语水平信息提取器 - 优先级优化版"""
 
     def extract(self, all_data: List[Dict[str, Any]]) -> str:
-        """提取日语水平
+        """提取日语水平，按优先级排序
+
+        优先级顺序：
+        1. 精确等级 (N1, N2, N3, N4, N5) - 最高优先级
+        2. 描述性等级 (ネイティブレベル, ビジネスレベル等) - 次优先级
 
         Args:
             all_data: 包含所有sheet数据的列表
@@ -21,182 +33,206 @@ class JapaneseLevelExtractor(BaseExtractor):
         Returns:
             日语水平字符串，如果未找到返回空字符串
         """
-        candidates = []
+        print("\n" + "=" * 60)
+        print("🔍 开始日语水平提取器执行流程 (优先级优化版)")
+        print("=" * 60)
 
-        for data in all_data:
+        all_candidates = []
+
+        for sheet_idx, data in enumerate(all_data):
             text = data["text"]
             df = data["df"]
-            sheet_name = data.get("sheet_name", "Unknown")
+            sheet_name = data.get("sheet_name", f"Sheet_{sheet_idx}")
 
-            print(f"\n🔍 开始日语水平提取 - Sheet: {sheet_name}")
+            print(f"\n📊 处理数据表 {sheet_idx+1}/{len(all_data)}: '{sheet_name}'")
 
-            # 搜索JLPT等级
-            jlpt_candidates = self._extract_jlpt_levels(text)
-            if jlpt_candidates:
-                print(f"    从JLPT模式提取到 {len(jlpt_candidates)} 个候选")
-            candidates.extend(jlpt_candidates)
+            # 🔥 步骤1: 优先提取精确等级 (N1-N5)
+            print(f"\n   🎯 步骤1: 搜索精确等级 (N1-N5)")
+            precise_levels = self._extract_precise_levels(text)
+            if precise_levels:
+                print(f"   ✅ 找到 {len(precise_levels)} 个精确等级")
+                all_candidates.extend(precise_levels)
+            else:
+                print(f"   ❌ 未找到精确等级")
 
-            # 搜索包含流暢等描述的日语水平
-            fluency_candidates = self._extract_fluency_levels(text)
-            if fluency_candidates:
-                print(f"    从流暢模式提取到 {len(fluency_candidates)} 个候选")
-            candidates.extend(fluency_candidates)
+            # 🔥 步骤2: 提取描述性等级 (仅在没有精确等级时作为备选)
+            print(f"\n   🎯 步骤2: 搜索描述性等级")
+            descriptive_levels = self._extract_descriptive_levels(text)
+            if descriptive_levels:
+                print(f"   ✅ 找到 {len(descriptive_levels)} 个描述性等级")
+                all_candidates.extend(descriptive_levels)
+            else:
+                print(f"   ❌ 未找到描述性等级")
 
-            # 搜索其他日语水平描述
-            other_candidates = self._extract_other_levels(text)
-            if other_candidates:
-                print(f"    从其他模式提取到 {len(other_candidates)} 个候选")
-            candidates.extend(other_candidates)
+        if not all_candidates:
+            print(f"\n❌ 未能提取到任何日语水平")
+            return ""
 
-        if candidates:
-            # 按置信度排序，返回最高的
-            candidates.sort(key=lambda x: x[1], reverse=True)
-            result = candidates[0][0]
-            print(f"\n✅ 最终日语水平: {result} (置信度: {candidates[0][1]:.2f})")
-            return result
+        # 🔥 步骤3: 按优先级选择最佳结果
+        final_result = self._select_best_by_priority(all_candidates)
 
-        print("\n❌ 未能提取到日语水平")
-        return ""
+        print(f"\n🎯 最终结果: {final_result}")
+        return final_result
 
-    def _extract_jlpt_levels(self, text: str) -> List[tuple]:
-        """提取JLPT等级"""
+    def _extract_precise_levels(self, text: str) -> List[Tuple[str, float, str]]:
+        """提取精确的JLPT等级 (N1-N5)
+
+        Returns:
+            List of (level, confidence, category) tuples
+        """
         candidates = []
 
-        # 扩展的JLPT模式列表
-        jlpt_patterns = [
-            # 高置信度模式 - 包含流暢等描述
-            (r"[NnＮ]([1-5１-５])\s*(?:かなり|とても|非常に)?\s*(?:流暢|流暢)", 4.0),
-            (
-                r"JLPT\s*[NnＮ]([1-5１-５])\s*(?:かなり|とても|非常に)?\s*(?:流暢|流暢)",
-                4.5,
-            ),
-            # 标准JLPT模式
-            (r"JLPT\s*[NnＮ]([1-5１-５])", 2.0),
-            (r"[NnＮ]([1-5１-５])\s*(?:合格|取得|レベル|級)", 1.8),
-            (r"日本語能力試験\s*[NnＮ]?([1-5１-５])\s*級?", 1.5),
-            (r"(?:^|\s)[NnＮ]([1-5１-５])(?:\s|$|[\(（])", 1.0),
-            (r"日本語.*?([一二三四五])級", 1.3),
-            (r"([一二三四五])級.*?日本語", 1.3),
+        # 🔥 精确等级模式 - 高优先级
+        precise_patterns = [
+            # 最高置信度：明确的JLPT N级表述
+            (r"JLPT\s*[NnＮ]([1-5１-５])", 5.0),
+            (r"日本語能力試験\s*[NnＮ]([1-5１-５])", 5.0),
+            # 🆕 旧格式JLPT支持：日本語能力試験1級 = N1
+            (r"日本語能力試験\s*([1-4１-４])\s*級", 5.0),
+            (r"JLPT\s*([1-4１-４])\s*級", 5.0),
+            (r"日語能力試験\s*([1-4１-４])\s*級", 5.0),
+            # 高置信度：N级 + 修饰词
+            (r"[NnＮ]([1-5１-５])\s*(?:合格|取得|レベル|級)", 4.5),
+            (r"[NnＮ]([1-5１-５])\s*(?:かなり|とても|非常に)?\s*(?:流暢|流暢)", 4.5),
+            # 中等置信度：标准N级格式
+            (r"(?:^|\s)[NnＮ]([1-5１-５])(?:\s|$|[、。,.\)])", 4.0),
+            # 较低置信度：汉字数字级别
+            (r"日本語.*?([一二三四五])級", 3.5),
+            (r"([一二三四五])級.*?日本語", 3.5),
         ]
 
-        for pattern, confidence in jlpt_patterns:
+        for pattern, confidence in precise_patterns:
             matches = re.finditer(pattern, text, re.IGNORECASE | re.MULTILINE)
             for match in matches:
                 level_str = match.group(1)
+                full_match = match.group(0)
 
-                # 汉字数字转换
+                # 🆕 处理旧格式JLPT (1級=N1, 2級=N2, 3級=N3, 4級=N4)
+                if "級" in full_match and not "N" in full_match.upper():
+                    # 旧格式：1級 -> N1, 2級 -> N2, etc.
+                    old_level_map = {
+                        "1": "1",
+                        "2": "2",
+                        "3": "3",
+                        "4": "4",
+                        "１": "1",
+                        "２": "2",
+                        "３": "3",
+                        "４": "4",
+                    }
+                    if level_str in old_level_map:
+                        level_num = old_level_map[level_str]
+                        level = f"N{level_num}"
+                        candidates.append((level, confidence, "precise"))
+                        print(
+                            f"      ✅ 旧格式JLPT: {level} (原文: '{full_match.strip()}' -> 转换为N{level_num})"
+                        )
+                        continue
+
+                # 转换汉字数字
                 kanji_to_num = {"一": "1", "二": "2", "三": "3", "四": "4", "五": "5"}
-
                 if level_str in kanji_to_num:
                     level_num = kanji_to_num[level_str]
                 else:
                     level_num = level_str.translate(self.trans_table)
 
-                level = f"N{level_num}"
-
-                # 检查是否包含流暢等描述
-                full_match = match.group(0)
-                if any(
-                    word in full_match
-                    for word in ["かなり", "とても", "非常に", "流暢", "流暢"]
-                ):
-                    level += "かなり流暢"
-                    confidence += 1.0
-                    print(f"    发现JLPT+流暢: {level} (原文: {full_match})")
-                else:
-                    print(f"    发现JLPT: {level} (原文: {full_match})")
-
-                candidates.append((level, confidence))
+                # 验证等级有效性
+                if level_num in ["1", "2", "3", "4", "5"]:
+                    level = f"N{level_num}"
+                    candidates.append((level, confidence, "precise"))
+                    print(f"      ✅ 精确等级: {level} (原文: '{full_match.strip()}')")
 
         return candidates
 
-    def _extract_fluency_levels(self, text: str) -> List[tuple]:
-        """提取包含流暢描述的日语水平"""
+    def _extract_descriptive_levels(self, text: str) -> List[Tuple[str, float, str]]:
+        """提取描述性日语等级
+
+        Returns:
+            List of (level, confidence, category) tuples
+        """
         candidates = []
 
-        # 查找包含流暢等描述的模式
-        fluency_patterns = [
-            # N级别+流暢组合
-            (r"[NnＮ]([1-5１-５])\s*(かなり|とても|非常に)?\s*(流暢|流暢)", 3.5),
-            # 日本語+流暢
-            (r"日本語\s*(かなり|とても|非常に)\s*(流暢|流暢)", 2.5),
-            (r"日本語.*?(かなり|とても|非常に).*?(流暢|流暢)", 2.0),
-            # 其他级别描述
-            (r"(ビジネス|商务)\s*レベル", 2.0),
-            (r"(母語|母国語|ネイティブ)\s*レベル", 3.0),
-            (r"(上級|中級|初級)\s*(レベル)?", 1.5),
+        # 🔥 描述性等级模式 - 中优先级
+        descriptive_patterns = [
+            # 高描述性置信度
+            (r"(ネイティブ|母語|母国語)\s*(?:レベル|级)?", "ネイティブレベル", 3.0),
+            (r"(ビジネス|商务)\s*(?:レベル|级)?", "ビジネスレベル", 2.8),
+            # 中等描述性置信度
+            (r"(?:かなり|とても|非常に)\s*(?:流暢|流暢)", "流暢", 2.5),
+            (r"(?:流暢|流暢)", "流暢", 2.0),
+            # 较低描述性置信度
+            (r"(上級)\s*(?:レベル|级)?", "上級", 1.8),
+            (r"(中級)\s*(?:レベル|级)?", "中級", 1.5),
+            (r"(初級)\s*(?:レベル|级)?", "初級", 1.2),
+            # 最低描述性置信度
+            (r"日本語.*?(上級)", "上級", 1.0),
+            (r"日本語.*?(中級)", "中級", 0.8),
+            (r"日本語.*?(初級)", "初級", 0.6),
         ]
 
-        for pattern, confidence in fluency_patterns:
+        for pattern, level_name, confidence in descriptive_patterns:
             matches = re.finditer(pattern, text, re.IGNORECASE)
             for match in matches:
                 full_match = match.group(0)
-
-                # 如果匹配到N级别+流暢
-                if re.search(r"[NnＮ]([1-5１-５])", full_match):
-                    level_match = re.search(r"[NnＮ]([1-5１-５])", full_match)
-                    if level_match:
-                        level_num = level_match.group(1).translate(self.trans_table)
-                        level = f"N{level_num}かなり流暢"
-                        candidates.append((level, confidence))
-                        print(f"    发现N级别+流暢: {level} (原文: {full_match})")
-                else:
-                    # 其他流暢描述
-                    if "ビジネス" in full_match or "商务" in full_match:
-                        level = "ビジネスレベル"
-                        candidates.append((level, confidence))
-                        print(f"    发现商务级别: {level} (原文: {full_match})")
-                    elif any(
-                        word in full_match for word in ["母語", "母国語", "ネイティブ"]
-                    ):
-                        level = "ネイティブレベル"
-                        candidates.append((level, confidence))
-                        print(f"    发现母语级别: {level} (原文: {full_match})")
-                    elif "上級" in full_match:
-                        level = "上級"
-                        candidates.append((level, confidence))
-                        print(f"    发现上级: {level} (原文: {full_match})")
-                    elif "中級" in full_match:
-                        level = "中級"
-                        candidates.append((level, confidence))
-                        print(f"    发现中级: {level} (原文: {full_match})")
-                    elif "流暢" in full_match or "流暢" in full_match:
-                        level = "流暢"
-                        candidates.append((level, confidence))
-                        print(f"    发现流暢: {level} (原文: {full_match})")
+                candidates.append((level_name, confidence, "descriptive"))
+                print(
+                    f"      ✅ 描述性等级: {level_name} (原文: '{full_match.strip()}')"
+                )
 
         return candidates
 
-    def _extract_other_levels(self, text: str) -> List[tuple]:
-        """提取其他日语水平描述"""
-        candidates = []
+    def _select_best_by_priority(self, candidates: List[Tuple[str, float, str]]) -> str:
+        """按优先级选择最佳日语水平
 
-        # 检查其他级别描述
-        other_patterns = [
-            (r"日本語.*?(ビジネス)", 1.0),
-            (r"日本語.*?(上級)", 0.8),
-            (r"日本語.*?(中級)", 0.7),
-            (r"日本語.*?(初級)", 0.5),
-            (r"(JLPT|日本語能力)", 0.5),  # 如果只提到但没有具体级别
-        ]
+        优先级规则：
+        1. 精确等级(precise) 永远优先于 描述性等级(descriptive)
+        2. 同类型内按置信度排序
+        3. 精确等级中，数字越小等级越高 (N1 > N2 > N3 > N4 > N5)
+        """
+        if not candidates:
+            return ""
 
-        for pattern, confidence in other_patterns:
-            matches = re.finditer(pattern, text, re.IGNORECASE)
-            for match in matches:
-                full_match = match.group(0)
-                matched_level = match.group(1)
+        print(f"\n📊 候选分析 (共 {len(candidates)} 个):")
 
-                if "ビジネス" in matched_level:
-                    candidates.append(("ビジネスレベル", confidence))
-                    print(f"    发现其他商务: ビジネスレベル (原文: {full_match})")
-                elif "上級" in matched_level:
-                    candidates.append(("上級", confidence))
-                    print(f"    发现其他上级: 上級 (原文: {full_match})")
-                elif "中級" in matched_level:
-                    candidates.append(("中級", confidence))
-                    print(f"    发现其他中级: 中級 (原文: {full_match})")
-                elif "初級" in matched_level:
-                    candidates.append(("初級", confidence))
-                    print(f"    发现其他初级: 初級 (原文: {full_match})")
+        # 分类候选
+        precise_candidates = [c for c in candidates if c[2] == "precise"]
+        descriptive_candidates = [c for c in candidates if c[2] == "descriptive"]
 
-        return candidates
+        print(f"   精确等级候选: {len(precise_candidates)} 个")
+        for level, conf, _ in precise_candidates:
+            print(f"      - {level} (置信度: {conf:.1f})")
+
+        print(f"   描述性等级候选: {len(descriptive_candidates)} 个")
+        for level, conf, _ in descriptive_candidates:
+            print(f"      - {level} (置信度: {conf:.1f})")
+
+        # 🔥 核心逻辑：精确等级绝对优先
+        if precise_candidates:
+            print(f"\n🎯 发现精确等级，优先选择精确等级")
+
+            # 在精确等级中选择最佳
+            # 先按置信度排序，再按N级数字排序 (N1最优)
+            def precise_sort_key(candidate):
+                level, confidence, _ = candidate
+                # 提取数字 (N1 -> 1)
+                level_num = int(level[1]) if len(level) > 1 else 9
+                # 置信度高且数字小的排在前面
+                return (-confidence, level_num)
+
+            best_precise = sorted(precise_candidates, key=precise_sort_key)[0]
+            result = best_precise[0]
+            print(f"   选择精确等级: {result}")
+            return result
+
+        elif descriptive_candidates:
+            print(f"\n🎯 未发现精确等级，选择描述性等级")
+
+            # 在描述性等级中选择置信度最高的
+            best_descriptive = max(descriptive_candidates, key=lambda x: x[1])
+            result = best_descriptive[0]
+            print(f"   选择描述性等级: {result}")
+            return result
+
+        else:
+            print(f"\n❌ 没有有效候选")
+            return ""
