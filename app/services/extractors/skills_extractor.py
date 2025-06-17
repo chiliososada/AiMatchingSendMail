@@ -126,6 +126,14 @@ class SkillsExtractor(BaseExtractor):
         print(f"\n🔄 开始去重和标准化...")
         print(f"    输入技能数量: {len(all_skills)}")
         final_skills = self._process_and_deduplicate_skills(all_skills)
+
+        final_skills = [
+            re.sub(r"\s+", " ", skill.strip())
+            for skill in final_skills
+            if skill and isinstance(skill, str)
+        ]
+
+        final_skills = self._split_valid_skills(final_skills)
         print(f"    输出技能数量: {len(final_skills)}")
 
         return final_skills
@@ -943,3 +951,127 @@ class SkillsExtractor(BaseExtractor):
             return False
 
         return False
+
+    def _split_valid_skills(self, final_skills):
+        """
+        智能拆分技能列表中的复合技能
+        这个方法可以直接添加到 SkillsExtractor 类中
+        """
+        # 导入有效技能列表
+        try:
+            from app.base.constants import VALID_SKILLS
+        except ImportError:
+            try:
+                from app.utils.resume_constants import VALID_SKILLS
+            except ImportError:
+                # 使用内置的核心技能列表
+                VALID_SKILLS = {
+                    "Java",
+                    "Python",
+                    "JavaScript",
+                    "TypeScript",
+                    "C",
+                    "C++",
+                    "C#",
+                    "PHP",
+                    "Ruby",
+                    "Go",
+                    "Eclipse",
+                    "IntelliJ",
+                    "VS Code",
+                    "React",
+                    "Vue",
+                    "Angular",
+                    "Spring",
+                    "SpringBoot",
+                    "Node.js",
+                    "MySQL",
+                    "PostgreSQL",
+                    "Oracle",
+                    "MongoDB",
+                    "Git",
+                    "GitHub",
+                    "SVN",
+                    "Docker",
+                    "AWS",
+                    "Azure",
+                    "HTML",
+                    "CSS",
+                    "Bootstrap",
+                    "jQuery",
+                }
+
+        if not final_skills:
+            return final_skills
+
+        # 处理 VALID_SKILLS 的不同格式
+        if isinstance(VALID_SKILLS, (list, tuple)):
+            valid_skills_set = set(VALID_SKILLS)
+        else:
+            valid_skills_set = VALID_SKILLS
+
+        # 创建不区分大小写的映射
+        skill_mapping = {}
+        for skill in valid_skills_set:
+            if isinstance(skill, str):
+                skill_mapping[skill.lower()] = skill
+
+        result_skills = []
+
+        for skill in final_skills:
+            if not skill or not isinstance(skill, str):
+                continue
+
+            skill = skill.strip()
+            if not skill:
+                continue
+
+            # 按空格拆分
+            parts = skill.split()
+
+            if len(parts) <= 1:
+                # 单个词，直接添加
+                result_skills.append(skill)
+            else:
+                # 多个词，检查拆分
+                valid_parts = []
+
+                for part in parts:
+                    part_clean = part.strip()
+                    if part_clean.lower() in skill_mapping:
+                        # 使用标准格式的技能名称
+                        valid_parts.append(skill_mapping[part_clean.lower()])
+                    else:
+                        # 检查常见变体
+                        variants = {
+                            "eclipse": "Eclipse",
+                            "eclipes": "Eclipse",
+                            "intellij": "IntelliJ",
+                            "vscode": "VS Code",
+                            "github": "GitHub",
+                            "springboot": "SpringBoot",
+                            "nodejs": "Node.js",
+                            "mysql": "MySQL",
+                        }
+
+                        if part_clean.lower() in variants:
+                            valid_parts.append(variants[part_clean.lower()])
+
+                if len(valid_parts) >= 2:
+                    # 成功拆分为多个有效技能
+                    print(f"🔧 拆分技能: '{skill}' -> {valid_parts}")
+                    result_skills.extend(valid_parts)
+                else:
+                    # 无法有效拆分，保持原样
+                    result_skills.append(skill)
+
+        # 去重
+        seen = set()
+        final_result = []
+
+        for skill in result_skills:
+            if skill and skill.lower() not in seen:
+                seen.add(skill.lower())
+                final_result.append(skill)
+
+        return final_result
