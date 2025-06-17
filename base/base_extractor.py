@@ -1,6 +1,3 @@
-# -*- coding: utf-8 -*-
-"""基础提取器类"""
-
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
 import pandas as pd
@@ -29,18 +26,7 @@ class BaseExtractor(ABC):
     def has_nearby_keyword(
         self, df: pd.DataFrame, row: int, col: int, keywords: List[str], radius: int = 5
     ) -> bool:
-        """检查附近是否有关键词
-
-        Args:
-            df: DataFrame对象
-            row: 行索引
-            col: 列索引
-            keywords: 关键词列表
-            radius: 搜索半径
-
-        Returns:
-            是否找到关键词
-        """
+        """检查附近是否有关键词"""
         for r in range(max(0, row - radius), min(len(df), row + radius + 1)):
             for c in range(
                 max(0, col - radius), min(len(df.columns), col + radius + 1)
@@ -53,19 +39,8 @@ class BaseExtractor(ABC):
     def get_context_score(
         self, df: pd.DataFrame, row: int, col: int, context_keywords: List[str]
     ) -> float:
-        """计算上下文评分
-
-        Args:
-            df: DataFrame对象
-            row: 行索引
-            col: 列索引
-            context_keywords: 上下文关键词
-
-        Returns:
-            上下文评分
-        """
+        """计算上下文评分"""
         score = 0.0
-
         for r in range(max(0, row - 3), min(len(df), row + 4)):
             for c in range(max(0, col - 5), min(len(df.columns), col + 6)):
                 cell = df.iloc[r, c]
@@ -74,5 +49,4 @@ class BaseExtractor(ABC):
                     for keyword in context_keywords:
                         if keyword in cell_str:
                             score += 1.0
-
         return score
