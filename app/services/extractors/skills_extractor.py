@@ -139,33 +139,33 @@ class SkillsExtractor(BaseExtractor):
         return final_skills
 
     def _find_project_start_row(self, df: pd.DataFrame) -> Optional[int]:
-        """从下往上找到项目表头行（包含項番、作業期間等的行）
+        """使用 design_keywords 从下往上查找项目表头行"""
+        print(f"    🔍 使用design_keywords查找项目表头行...")
 
-        Returns:
-            项目表头行号，如果没找到则返回None
-        """
-        project_header_keywords = [
-            "項番",
-            "作業期間",
-            "開発場所",
-            "言語",
-            "ツール",
-            "DB",
-        ]
+        # 从下往上扫描，找到包含>=3个工程阶段关键词的行
+        for row in range(len(df) - 1, -1, -1):
+            design_count = 0
+            found_keywords = []
 
-        # **关键修复：从下往上查找，找到第一个就停止**
-        for row in range(len(df) - 1, -1, -1):  # 从最后一行往上找
             for col in range(len(df.columns)):
                 cell = df.iloc[row, col]
                 if pd.notna(cell):
                     cell_str = str(cell).strip()
-                    # 检查是否包含项目表头关键词
-                    if any(keyword in cell_str for keyword in project_header_keywords):
-                        print(
-                            f"    发现项目表头: 第{row + 1}行,第{col + 1}列 = '{cell_str}'"
-                        )
-                        return row  # **找到第一个就立即返回，不再继续查找**
 
+                    # 使用 design_keywords 而不是 project_header_keywords
+                    for keyword in self.design_keywords:
+                        if keyword in cell_str:
+                            design_count += 1
+                            found_keywords.append(keyword)
+                            break
+
+            # 如果该行包含3个或以上的工程阶段关键词，认为是项目表头
+            if design_count >= 3:
+                print(f"    ✅ 找到项目表头行: 第{row + 1}行")
+                print(f"    📍 包含工程阶段关键词: {found_keywords}")
+                return row
+
+        print(f"    ❌ 未找到包含足够工程阶段关键词的项目表头行")
         return None
 
     def _extract_project_row_skills(
