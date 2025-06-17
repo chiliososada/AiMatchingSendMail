@@ -4,6 +4,9 @@ import pandas as pd
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 import logging
+
+# 在文件顶部添加这个导入
+from app.utils.text_utils import dataframe_to_text
 from datetime import datetime
 import time
 
@@ -88,7 +91,7 @@ class ResumeParserService:
             }
 
     def _load_excel_data(self, file_path: str) -> List[Dict[str, Any]]:
-        """加载Excel数据"""
+        """加载Excel数据 - 修复版本"""
         all_data = []
         file_obj = Path(file_path)
 
@@ -116,7 +119,15 @@ class ResumeParserService:
                         )
 
                         if not df.empty:
-                            all_data.append({"sheet_name": sheet_name, "df": df})
+                            # ✅ 关键修复：添加 text 键
+                            text = dataframe_to_text(df)
+                            all_data.append(
+                                {
+                                    "sheet_name": sheet_name,
+                                    "df": df,
+                                    "text": text,  # 添加这个键！
+                                }
+                            )
 
                     except Exception as e:
                         logger.warning(f"读取工作表 {sheet_name} 失败: {e}")

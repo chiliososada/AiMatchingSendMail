@@ -8,6 +8,10 @@
 - security: 安全相关工具（加密、解密、文件验证等）
 """
 
+from .date_utils import convert_excel_serial_to_date, calculate_age_from_birthdate
+from .text_utils import dataframe_to_text
+from .validation_utils import is_valid_name
+
 from .security import (
     # 密码加密解密
     encrypt_password,
@@ -53,6 +57,10 @@ __all__ = [
     "verify_signed_url",
     # 安全头部
     "get_security_headers",
+    "convert_excel_serial_to_date",
+    "calculate_age_from_birthdate",
+    "dataframe_to_text",
+    "is_valid_name",
 ]
 
 # 工具分类

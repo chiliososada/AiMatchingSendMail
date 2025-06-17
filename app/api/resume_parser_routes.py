@@ -2,11 +2,13 @@
 from fastapi import APIRouter, HTTPException, status, UploadFile, File, Form
 from fastapi.responses import JSONResponse
 from typing import List, Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 import logging
 from pathlib import Path
 import aiofiles
 import os
+import asyncio
+import time
 
 from ..services.resume_parser_service import ResumeParserService
 from ..schemas.resume_parser_schemas import (
@@ -43,8 +45,11 @@ async def parse_resume(file: UploadFile = File(...), tenant_id: UUID = Form(...)
             detail="仅支持Excel文件格式 (.xls, .xlsx)",
         )
 
-    # 保存临时文件
-    temp_file_path = TEMP_DIR / f"{tenant_id}_{file.filename}"
+    # 使用时间戳和UUID创建唯一的临时文件名
+    timestamp = int(time.time() * 1000000)  # 微秒级时间戳
+    unique_id = uuid4().hex[:8]
+    safe_filename = file.filename.replace(" ", "_")
+    temp_file_path = TEMP_DIR / f"{tenant_id}_{timestamp}_{unique_id}_{safe_filename}"
 
     try:
         # 异步保存文件
@@ -92,8 +97,14 @@ async def parse_resumes_batch(
 
     try:
         # 保存所有临时文件
-        for file in files:
-            temp_file_path = TEMP_DIR / f"{tenant_id}_{file.filename}"
+        for idx, file in enumerate(files):
+            timestamp = int(time.time() * 1000000)
+            unique_id = uuid4().hex[:8]
+            safe_filename = file.filename.replace(" ", "_")
+            temp_file_path = (
+                TEMP_DIR / f"{tenant_id}_{timestamp}_{unique_id}_{idx}_{safe_filename}"
+            )
+
             async with aiofiles.open(temp_file_path, "wb") as f:
                 content = await file.read()
                 await f.write(content)
@@ -144,7 +155,13 @@ async def validate_resume_format(
             "supported_formats": [".xls", ".xlsx"],
         }
 
-    temp_file_path = TEMP_DIR / f"validate_{tenant_id}_{file.filename}"
+    # 使用时间戳和UUID创建唯一的临时文件名
+    timestamp = int(time.time() * 1000000)  # 微秒级时间戳
+    unique_id = uuid4().hex[:8]
+    safe_filename = file.filename.replace(" ", "_")
+    temp_file_path = (
+        TEMP_DIR / f"validate_{tenant_id}_{timestamp}_{unique_id}_{safe_filename}"
+    )
 
     try:
         # 保存临时文件
@@ -152,11 +169,21 @@ async def validate_resume_format(
             content = await file.read()
             await f.write(content)
 
-        # 尝试加载文件
+        # 确保文件写入完成
+        await asyncio.sleep(0.01)  # 短暂等待确保文件系统同步
+
+        # 创建新的服务实例，避免任何潜在的状态问题
         service = ResumeParserService()
+
+        # 尝试加载文件
         data = await asyncio.to_thread(service._load_excel_data, str(temp_file_path))
 
         if data:
+            # 添加调试日志
+            logger.info(
+                f"验证文件: {file.filename}, 工作表数: {len(data)}, 总行数: {sum(len(d['df']) for d in data)}"
+            )
+
             return {
                 "valid": True,
                 "sheets": len(data),
@@ -169,7 +196,12 @@ async def validate_resume_format(
             return {"valid": False, "reason": "无法读取文件内容"}
 
     except Exception as e:
+        logger.error(f"验证文件格式失败: {str(e)}", exc_info=True)
         return {"valid": False, "reason": str(e)}
     finally:
+        # 确保文件被删除
         if temp_file_path.exists():
-            os.remove(temp_file_path)
+            try:
+                os.remove(temp_file_path)
+            except Exception as e:
+                logger.warning(f"删除临时文件失败: {str(e)}")
