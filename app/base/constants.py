@@ -1,14 +1,12 @@
-# base/constants.py
 # -*- coding: utf-8 -*-
-"""常量定义 - 完整版，包含所有提取器需要的KEYWORDS"""
+"""常量定义"""
 
-# 🔥 关键修复：添加完整的KEYWORDS定义
+# 关键词定义
 KEYWORDS = {
     "name": ["氏名", "氏 名", "名前", "フリガナ", "Name", "名　前", "姓名"],
     "age": ["年齢", "年龄", "年令", "歳", "才", "Age", "年　齢", "生年月", "満"],
     "gender": ["性別", "性别", "Gender", "性　別"],
     "nationality": ["国籍", "出身国", "出身地", "Nationality", "国　籍"],
-    # 🔥 关键修复：experience关键词（arrival_year_extractor依赖）
     "experience": [
         "経験年数",
         "実務経験",
@@ -26,7 +24,6 @@ KEYWORDS = {
         "コンピュータソフトウエア関連業務",
         "実務年数",
     ],
-    # 🔥 关键修复：arrival关键词（experience_extractor依赖）
     "arrival": [
         "来日",
         "渡日",
@@ -92,7 +89,7 @@ VALID_NATIONALITIES = [
 # 技能标记符号
 SKILL_MARKS = ["◎", "○", "△", "×", "★", "●", "◯", "▲", "※"]
 
-# 有效技能列表（保持原有定义）
+# 有效技能列表
 VALID_SKILLS = {
     # 编程语言
     "Java",
@@ -182,188 +179,99 @@ VALID_SKILLS = {
     "GitLab",
     "SVN",
     "TortoiseSVN",
-    "SourceTree",
-    "Mercurial",
     "Jenkins",
-    "GitLab CI",
-    "GitHub Actions",
-    "CircleCI",
-    "Travis CI",
     "Maven",
     "Gradle",
-    "Ant",
-    "npm",
-    "yarn",
-    "pip",
-    "composer",
-    # 开发工具
-    "Eclipse",
-    "IntelliJ IDEA",
-    "Visual Studio",
-    "VS Code",
-    "Xcode",
-    "Android Studio",
-    "NetBeans",
-    "Sublime Text",
-    "Atom",
-    "WebStorm",
-    "PyCharm",
-    "PhpStorm",
-    "RubyMine",
-    "CLion",
-    "DataGrip",
-    # 操作系统
+    # OS
     "Windows",
+    "Windows 10",
     "Linux",
     "Unix",
-    "macOS",
+    "Solaris",
+    "DOS/V",
+    "Win95/98",
+    "win10",
     "Ubuntu",
     "CentOS",
-    "Debian",
-    "Red Hat",
-    "SUSE",
-    "AIX",
-    "Solaris",
-    "FreeBSD",
-    # Web服务器
-    "Nginx",
+    "RedHat",
+    # 服务器
     "Apache",
-    "IIS",
+    "Nginx",
     "Tomcat",
-    "WebLogic",
     "WebSphere",
     "JBoss",
-    "Undertow",
-    # 消息队列
-    "RabbitMQ",
-    "Kafka",
-    "ActiveMQ",
-    "ZeroMQ",
-    "Redis Pub/Sub",
+    "JBOSS",
+    "IIS",
+    # IDE和工具
+    "Eclipse",
+    "IntelliJ",
+    "VS Code",
+    "Visual Studio",
+    "Android Studio",
+    "NetBeans",
+    "Xcode",
+    "A5M2",
+    "WinMerge",
+    "WinSCP",
+    "Sourcetree",
+    "Postman",
+    "Fiddler",
+    "Charles",
+    "Form Designer",
+    # 测试工具
+    "JUnit",
+    "Junit",
+    "Selenium",
+    "JMeter",
+    "Jmeter",
+    "Spock",
     # 其他技术
-    "REST",
-    "GraphQL",
-    "SOAP",
-    "gRPC",
-    "WebSocket",
-    "OAuth",
-    "JWT",
-    "SSL/TLS",
-    "HTTP/HTTPS",
-    "TCP/IP",
-    "DNS",
-    "JSON",
     "XML",
-    "YAML",
-    "Protobuf",
-    # 机器学习/AI
-    "TensorFlow",
-    "PyTorch",
-    "Keras",
-    "scikit-learn",
-    "OpenCV",
-    "NLTK",
-    "spaCy",
-    "Pandas",
-    "NumPy",
-    "Matplotlib",
-    "Jupyter",
-    # 大数据
-    "Hadoop",
-    "Spark",
-    "Hive",
-    "HBase",
-    "Flink",
-    "Storm",
-    "Zookeeper",
-    "Kafka",
-    "ElasticSearch",
-    "Logstash",
-    "Kibana",
+    "JSON",
+    "REST",
+    "SOAP",
+    "Ajax",
+    "Microservices",
+    "Shell",
+    "Bash",
+    "PowerShell",
+    "VBScript",
     # 移动开发
     "Android",
     "iOS",
     "React Native",
     "Flutter",
-    "Xamarin",
-    "Ionic",
-    "Cordova",
-    "Unity",
-    "Unreal Engine",
-    # 日本特有工具
-    "TeraTerm",
-    "Tera Term",
-    "JP1",
-    "Hulft",
-    "A5:SQL",
-    "秀丸",
-    "サクラエディタ",
-    "WinSCP",
-    "FFFTP",
-    "Win95/98",
-    "WinNT",
-    "Win2000",
-    "WinXP",
-    "Win7",
-    "Win8",
-    "Win10",
-    "Win11",
+    # 其他框架和库
+    "TERASOLUNA",
+    "OutSystems",
+    "Wacs",
+    # Web相关
+    "PHP/HTML",
+    "Jquery",
+    "JAVASCRIPT",
 }
 
-# 排除模式（用于技能过滤）
+# 需要排除的非技能内容模式
 EXCLUDE_PATTERNS = [
-    r"^\d+$",  # 纯数字
-    r"^[A-Z]$",  # 单个大写字母
-    r"^(and|or|the|of|in|on|at|to|for)$",  # 常见介词
-    r"^(年|月|日|時|分|秒)$",  # 时间单位
-    r"^第\d+",  # 第N个
-    r"^その他",  # 其他
-    r"^備考",  # 备考
-    r"^注意",  # 注意
-    r"^説明",  # 说明
-]
-
-# 工作范围选项
-WORK_SCOPE_OPTIONS = [
-    "要件定義",
-    "基本設計",
-    "詳細設計",
-    "製造",
-    "開発",
-    "単体テスト",
-    "結合テスト",
-    "総合テスト",
-    "システムテスト",
-    "運用保守",
-    "運用",
-    "保守",
-    "サポート",
-    "導入",
-    "移行",
-    "プロジェクト管理",
-    "品質管理",
-    "構成管理",
-]
-
-# 角色选项
-ROLE_OPTIONS = [
-    "PM",
-    "PL",
-    "SL",
-    "TL",
-    "BSE",
-    "SE",
-    "PG",
-    "PE",
-    "アーキテクト",
-    "コンサルタント",
-    "サポート",
-    "QA",
-    "QC",
-    "テスター",
-    "デザイナー",
-    "UI/UX",
-    "インフラ",
-    "DevOps",
-    "SRE",
+    r"^\d{4}[-/]\d{2}[-/]\d{2}",
+    r"^\d{2,4}年\d{1,2}月",
+    r"\d+人",
+    r"人以[下上]",
+    r"^(基本|詳細)設計$",
+    r"^製造$",
+    r"^(単体|結合|総合|運用)[試験テスト]",
+    r"^保守運用$",
+    r"^要件定義$",
+    r"^(PM|PL|SL|TL|BSE|SE|PG)$",
+    r"^管理$",
+    r"管理経験",
+    r"^教\s*育$",
+    r"業務経歴",
+    r"プロジェクト",
+    r"^その他$",
+    r"^過去の",
+    r"【.*】",
+    r"^[A-BD-Z]$",
+    r"^携帯$",
+    r"^E-mail$",
 ]
