@@ -16,6 +16,7 @@ from .email_service import EmailService, AttachmentManager
 from .smtp_service import SMTPService
 from .ai_matching_service import AIMatchingService
 from .ai_matching_database import AIMatchingDatabase
+from .resume_parser_service import ResumeParserService
 
 # 导出所有服务
 __all__ = [
@@ -24,6 +25,7 @@ __all__ = [
     "AttachmentManager",
     "AIMatchingService",
     "AIMatchingDatabase",
+    "ResumeParserService",
 ]
 
 
@@ -60,6 +62,7 @@ SERVICE_REGISTRY = {
     "attachment": AttachmentManager,
     "ai_matching": AIMatchingService,
     "ai_matching_db": AIMatchingDatabase,
+    "resume_parser": ResumeParserService,
 }
 
 # 服务配置

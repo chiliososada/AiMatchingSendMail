@@ -16,6 +16,8 @@ from .api.email_routes import router as email_router
 from .api.smtp_routes import router as smtp_router
 from .database import db_manager, health_check as db_health_check
 from .api.ai_matching_routes import router as ai_matching_router
+from .api.resume_parser_routes import router as resume_parser_router
+
 
 # 配置日志
 logging.basicConfig(
@@ -188,7 +190,11 @@ app.include_router(
 app.include_router(
     ai_matching_router, prefix=f"{settings.API_V1_STR}/ai-matching", tags=["AI智能匹配"]
 )
-
+app.include_router(
+    resume_parser_router,
+    prefix=f"{settings.API_V1_STR}/resume-parser",
+    tags=["简历解析"],
+)
 
 # 根路径和健康检查
 
@@ -213,6 +219,9 @@ async def root():
             "AI智能匹配系统",  # 新增
             "案件简历智能推荐",  # 新增
             "多维度匹配算法",  # 新增
+            "简历解析服务",  # 新增
+            "支持Excel格式简历解析",  # 新增
+            "批量简历处理",  # 新增
         ],
         "api_endpoints": {
             "docs": "/docs",
