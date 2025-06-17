@@ -211,7 +211,7 @@ class SkillsExtractor(BaseExtractor):
                                     )
                                     for line in tech_lines:
                                         if self._is_valid_skill(line):
-                                            normalized = self._normalize_skill_name(
+                                            normalized = self._extract_skills_from_text(
                                                 line
                                             )
                                             skills.append(normalized)
@@ -232,8 +232,10 @@ class SkillsExtractor(BaseExtractor):
         return skills
 
     def _is_likely_tech_skill(self, text: str) -> bool:
-        """判断是否可能是技术技能"""
-        if not text or len(text) < 2 or len(text) > 30:
+        """判断是否可能是技术技能 - 修复版本"""
+        if (
+            not text or len(text) < 2 or len(text) > 100
+        ):  # 🔥 增加长度限制，支持复杂技能
             return False
 
         # 排除明显非技能的内容
@@ -244,15 +246,74 @@ class SkillsExtractor(BaseExtractor):
         if text.upper() in ["PM", "PL", "SL", "TL", "BSE", "SE", "PG"]:
             return False
 
-        # 🔥 修复：添加对括号的支持
-        # 常见技能模式
-        tech_patterns = [
-            r"^[A-Za-z#][A-Za-z0-9#\s\.\+\-\(\)]*$",  # 🔥 添加了 # 和 \(\) 支持 C# ASP.NET(MVC 5)
-            r"^[A-Za-z][A-Za-z0-9]*\.[A-Za-z][A-Za-z0-9]*$",  # 如 Node.js
-            r"^[A-Za-z]+[0-9]*$",  # 如 HTML5
+        # 🔥 修复：特殊检查包含AWS的复杂格式
+        if "AWS" in text.upper():
+            print(f"        检测到AWS相关内容: {text}")
+            return True
+
+        # 🔥 修复：检查是否包含已知的技术关键词
+        known_tech_keywords = [
+            "Python",
+            "Java",
+            "JavaScript",
+            "C#",
+            "C++",
+            "PHP",
+            "Ruby",
+            "Go",
+            "Spring",
+            "React",
+            "Vue",
+            "Angular",
+            "Node.js",
+            "jQuery",
+            "MySQL",
+            "PostgreSQL",
+            "Oracle",
+            "MongoDB",
+            "Redis",
+            "Windows",
+            "Linux",
+            "Unix",
+            "macOS",
+            "Git",
+            "SVN",
+            "GitHub",
+            "Docker",
+            "Kubernetes",
+            "Eclipse",
+            "IntelliJ",
+            "VS Code",
+            "Visual Studio",
+            "TeraTerm",
+            "JP1",
+            "HTML",
+            "CSS",
+            "Bootstrap",
         ]
 
-        return any(re.match(pattern, text) for pattern in tech_patterns)
+        text_upper = text.upper()
+        for keyword in known_tech_keywords:
+            if keyword.upper() in text_upper:
+                print(f"        包含已知技术关键词 '{keyword}': {text}")
+                return True
+
+        # 🔥 修复：更完善的技能模式匹配，支持全角括号和复杂格式
+        tech_patterns = [
+            r"^[A-Za-z#][A-Za-z0-9#\s\.\+\-\(\)（）/／]*$",  # 🔥 支持全角括号和斜杠
+            r"^[A-Za-z][A-Za-z0-9]*\.[A-Za-z][A-Za-z0-9]*$",  # 如 Node.js
+            r"^[A-Za-z]+[0-9]*$",  # 如 HTML5
+            r"^AWS\s+\w+$",  # AWS服务如 "AWS S3"
+            r".*AWS.*（.*）.*",  # AWS括号格式：AWS（service1/service2）
+            r".*[A-Za-z]+.*[（(].*[）)].*",  # 任何包含字母和括号的组合
+        ]
+
+        for pattern in tech_patterns:
+            if re.match(pattern, text):
+                print(f"        匹配技能模式: {text}")
+                return True
+
+        return False
 
     def _is_likely_single_tech_skill(self, text: str) -> bool:
         """判断是否可能是单个技术技能"""
@@ -320,10 +381,12 @@ class SkillsExtractor(BaseExtractor):
                             for line in lines:
                                 line = line.strip()
                                 if line and self._is_likely_tech_skill(line):
-                                    if self._is_valid_skill(line):
-                                        normalized = self._normalize_skill_name(line)
-                                        skills.append(normalized)
-                                        print(f"            - {line} -> {normalized}")
+                                    print(f"            处理技能行: '{line}'")
+
+                                    # 🔥 关键修复：使用 _extract_skills_from_text 处理复杂技能
+                                    line_skills = self._extract_skills_from_text(line)
+                                    skills.extend(line_skills)
+                                    print(f"            提取结果: {line_skills}")
 
         print(f"    横向表格提取完成，共找到 {len(skills)} 个技能")
         return skills
@@ -360,7 +423,7 @@ class SkillsExtractor(BaseExtractor):
         return skills
 
     def _extract_skills_from_text(self, text: str) -> List[str]:
-        """从文本中提取技能"""
+        """从文本中提取技能 - 完整修复版本"""
         skills = []
         text = text.strip()
 
@@ -370,29 +433,98 @@ class SkillsExtractor(BaseExtractor):
         # 移除标记符号
         text = re.sub(r"^[◎○△×★●◯▲※・\-\s]+", "", text)
 
+        print(f"        处理文本: '{text}'")
+
         # 处理括号内的内容
-        # 例如: "Python AWS (glue/S3/Lambda/EC2/IAM/codecommit)"
-        bracket_pattern = r"([^(]+)\s*\(([^)]+)\)"
-        bracket_match = re.match(bracket_pattern, text)
+        bracket_patterns = [
+            r"([^（(]+)\s*（([^）]+)）",  # 全角括号（优先匹配）
+            r"([^（(]+)\s*\(([^)]+)\)",  # 半角括号
+        ]
+
+        bracket_match = None
+        # 循环匹配每个正则表达式
+        for pattern in bracket_patterns:
+            bracket_match = re.match(pattern, text)
+            if bracket_match:
+                print(f"        ✅ 匹配到括号模式: {pattern}")
+                break
 
         if bracket_match:
             # 括号前的内容
-            main_part = bracket_match.group(1)
+            main_part = bracket_match.group(1).strip()
             # 括号内的内容
-            bracket_content = bracket_match.group(2)
+            bracket_content = bracket_match.group(2).strip()
+
+            print(f"        主要部分: '{main_part}'")
+            print(f"        括号内容: '{bracket_content}'")
 
             # 提取主要部分的技能
             main_skills = self._split_and_validate_skills(main_part)
             skills.extend(main_skills)
+            print(f"        主要部分提取的技能: {main_skills}")
 
-            # 提取括号内的技能（通常是具体的服务/模块）
-            bracket_skills = self._split_and_validate_skills(bracket_content)
-            skills.extend(bracket_skills)
+            # 🔥 关键修复：检查主要部分是否包含AWS
+            main_part_upper = main_part.upper()
+            if "AWS" in main_part_upper:
+                print(f"        检测到AWS，处理括号内的服务...")
+                # 括号内是AWS服务列表，使用专门的AWS服务提取方法
+                aws_services = self._extract_aws_services(bracket_content)
+                skills.extend(aws_services)
+                print(f"        AWS服务: {aws_services}")
+
+                # 🔥 处理括号后可能的其他技能
+                remaining_text = text[bracket_match.end() :].strip()
+                print(f"        括号后剩余文本: '{remaining_text}'")
+
+                if remaining_text.startswith("/") or remaining_text.startswith("／"):
+                    remaining_text = remaining_text[1:].strip()
+
+                if remaining_text:
+                    remaining_skills = self._split_and_validate_skills(remaining_text)
+                    skills.extend(remaining_skills)
+                    print(f"        括号后的技能: {remaining_skills}")
+            else:
+                # 普通的括号内容处理
+                bracket_skills = self._split_and_validate_skills(bracket_content)
+                skills.extend(bracket_skills)
+                print(f"        普通括号内容技能: {bracket_skills}")
         else:
             # 没有括号，直接提取
+            print(f"        无括号模式，直接分割")
             skills.extend(self._split_and_validate_skills(text))
 
+        print(f"        _extract_skills_from_text 最终结果: {skills}")
         return skills
+
+    def _extract_aws_services(self, services_text: str) -> List[str]:
+        """专门提取AWS服务的方法"""
+        aws_skills = ["AWS"]  # 总是包含AWS主技能
+
+        # 分割AWS服务，支持 / 和 ／
+        services = re.split(r"[/／]+", services_text)
+
+        for service in services:
+            service = service.strip()
+            if service:
+                normalized_service = self._normalize_aws_service(service)
+                if normalized_service:
+                    aws_skills.append(f"AWS {normalized_service}")
+
+        return aws_skills
+
+    def _normalize_aws_service(self, service: str) -> str:
+        """规范化AWS服务名称"""
+        aws_service_mapping = {
+            "glue": "Glue",
+            "s3": "S3",
+            "lambda": "Lambda",
+            "ec2": "EC2",
+            "iam": "IAM",
+            "codecommit": "CodeCommit",
+        }
+
+        service_lower = service.lower()
+        return aws_service_mapping.get(service_lower, service)
 
     def _split_and_validate_skills(self, text: str) -> List[str]:
         """分割文本并验证技能"""
