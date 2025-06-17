@@ -7,8 +7,8 @@ from collections import defaultdict
 import pandas as pd
 import re
 
-from base.base_extractor import BaseExtractor
-from base.constants import KEYWORDS
+from app.base.constants import KEYWORDS
+from app.base.base_extractor import BaseExtractor
 from app.utils.date_utils import convert_excel_serial_to_date
 
 

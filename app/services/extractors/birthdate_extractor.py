@@ -6,7 +6,7 @@ from datetime import datetime
 import pandas as pd
 import re
 
-from base.base_extractor import BaseExtractor
+from app.base.base_extractor import BaseExtractor
 from app.utils.date_utils import convert_excel_serial_to_date
 
 

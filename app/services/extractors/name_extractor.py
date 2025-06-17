@@ -5,8 +5,8 @@ from typing import List, Dict, Any
 import pandas as pd
 import re
 
-from base.base_extractor import BaseExtractor
-from base.constants import KEYWORDS
+from app.base.constants import KEYWORDS
+from app.base.base_extractor import BaseExtractor
 from app.utils.validation_utils import is_valid_name
 
 

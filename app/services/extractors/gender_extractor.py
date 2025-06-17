@@ -4,8 +4,8 @@
 from typing import List, Dict, Any, Optional
 import pandas as pd
 
-from base.base_extractor import BaseExtractor
-from base.constants import KEYWORDS
+from app.base.constants import KEYWORDS
+from app.base.base_extractor import BaseExtractor
 
 
 class GenderExtractor(BaseExtractor):

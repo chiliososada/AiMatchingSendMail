@@ -5,8 +5,8 @@ from typing import List, Dict, Any, Optional
 from collections import defaultdict
 import pandas as pd
 
-from base.base_extractor import BaseExtractor
-from base.constants import KEYWORDS, VALID_NATIONALITIES
+from app.base.base_extractor import BaseExtractor
+from app.base.constants import KEYWORDS, VALID_NATIONALITIES
 
 
 class NationalityExtractor(BaseExtractor):

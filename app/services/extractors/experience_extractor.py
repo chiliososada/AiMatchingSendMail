@@ -6,8 +6,8 @@ from datetime import datetime
 import pandas as pd
 import re
 
-from base.base_extractor import BaseExtractor
-from base.constants import KEYWORDS
+from app.base.constants import KEYWORDS
+from app.base.base_extractor import BaseExtractor
 
 
 class ExperienceExtractor(BaseExtractor):

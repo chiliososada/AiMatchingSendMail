@@ -5,8 +5,8 @@ from typing import List, Dict, Any, Tuple, Optional
 import pandas as pd
 import re
 
-from base.base_extractor import BaseExtractor
-from base.constants import VALID_SKILLS, SKILL_MARKS, EXCLUDE_PATTERNS
+from app.base.base_extractor import BaseExtractor
+from app.base.constants import VALID_SKILLS, SKILL_MARKS, EXCLUDE_PATTERNS
 
 
 class SkillsExtractor(BaseExtractor):

@@ -5,7 +5,7 @@ from typing import List, Dict, Any, Set
 import pandas as pd
 import re
 
-from base.base_extractor import BaseExtractor
+from app.base.base_extractor import BaseExtractor
 
 
 class WorkScopeExtractor(BaseExtractor):
