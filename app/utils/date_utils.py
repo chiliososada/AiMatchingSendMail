@@ -39,16 +39,18 @@ def convert_excel_serial_to_date(
     return None
 
 
-def calculate_age_from_birthdate(birthdate: datetime) -> Optional[int]:
+def calculate_age_from_birthdate(birthdate_str: str) -> Optional[int]:
     """从生年月日计算年龄
 
     Args:
-        birthdate: 出生日期
+        birthdate_str: 生年月日字符串，格式 "YYYY-MM-DD"
 
     Returns:
         年龄，如果不合理返回None
     """
     try:
+        # 先将字符串转换为 datetime 对象
+        birthdate = datetime.strptime(birthdate_str, "%Y-%m-%d")
         current_date = datetime(2024, 11, 1)
         age = current_date.year - birthdate.year
 
@@ -60,7 +62,8 @@ def calculate_age_from_birthdate(birthdate: datetime) -> Optional[int]:
         if 15 <= age <= 75:
             return age
 
-    except:
+    except (ValueError, TypeError) as e:
+        print(f"生年月日格式错误: {e}")
         pass
 
     return None
