@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""技能提取器 - 修复提取范围版本"""
+"""技能提取器 - 最终完整版"""
 
 from typing import List, Dict, Any, Tuple, Optional
 import pandas as pd
@@ -73,14 +73,7 @@ class SkillsExtractor(BaseExtractor):
         }
 
     def extract(self, all_data: List[Dict[str, Any]]) -> List[str]:
-        """提取技能列表 - 限制在工程阶段关键词之下
-
-        Args:
-            all_data: 包含所有sheet数据的列表
-
-        Returns:
-            技能列表
-        """
+        """提取技能列表 - 只提取项目经验部分的技能"""
         all_skills = []
 
         for data in all_data:
@@ -90,45 +83,51 @@ class SkillsExtractor(BaseExtractor):
             print(f"\n🔍 开始技术关键字提取 - Sheet: {sheet_name}")
             print(f"    表格大小: {df.shape[0]}行 x {df.shape[1]}列")
 
-            # **关键修复：先确定工程阶段的最小行位置，只在该行之下提取技能**
-            min_design_row = self._find_min_design_row(df)
+            # 从下往上找项目表头行
+            project_start_row = self._find_project_start_row(df)
 
-            if min_design_row is not None:
-                print(f"    ✓ 找到工程阶段起始行: {min_design_row + 1}")
-                print(f"    📍 只提取第{min_design_row + 1}行之下的技能")
+            if project_start_row is not None:
+                print(f"    ✅ 找到项目表头行: 第{project_start_row + 1}行")
+                print(f"    📍 只提取第{project_start_row + 1}行之下的项目经验技能")
 
-                # 方法1：基于工程阶段列定位技术列（限制在项目表头之下）
-                skills, design_positions = (
-                    self._extract_skills_by_design_column_limited(df, project_start_row)
+                # 方法1：项目经验行技能提取（主要方法）
+                project_skills = self._extract_project_row_skills(df, project_start_row)
+                print(
+                    f"    📊 项目经验行提取到: {len(project_skills)} 个技能: {project_skills}"
                 )
-                if skills:
-                    print(f"    ✓ 从技术列提取到 {len(skills)} 个技能")
-                    all_skills.extend(skills)
+                all_skills.extend(project_skills)
 
-                # **新增方法：横向技能表格处理（限制在项目表头之下）**
+                # 方法2：项目经验区域的横向技能提取（补充方法）
                 horizontal_skills = self._extract_skills_from_horizontal_table_limited(
                     df, project_start_row
                 )
-                if horizontal_skills:
-                    print(f"    ✓ 从横向表格提取到 {len(horizontal_skills)} 个技能")
-                    all_skills.extend(horizontal_skills)
+                print(
+                    f"    📊 项目经验横向提取到: {len(horizontal_skills)} 个技能: {horizontal_skills}"
+                )
+                all_skills.extend(horizontal_skills)
 
-                # 备用方法：如果主方法失败或提取太少（限制在项目表头之下）
-                if len(all_skills) < 10:
-                    print(
-                        f"    使用备用方法补充提取（限制在第{project_start_row + 1}行之下）"
-                    )
+                # 如果技能还是太少，使用备用方法（仅限项目经验区域）
+                if len(all_skills) < 15:
+                    print(f"    技能数量不足，使用备用方法补充（仅限项目经验区域）")
                     fallback_skills = self._extract_skills_fallback_limited(
                         df, project_start_row
                     )
+                    print(
+                        f"    📊 备用方法提取到: {len(fallback_skills)} 个技能: {fallback_skills}"
+                    )
                     all_skills.extend(fallback_skills)
+
+                print(f"    📊 所有方法共提取到: {len(all_skills)} 个原始技能")
             else:
                 print("    ❌ 未找到项目表头关键词，无法确定提取范围")
-                print("    🚫 跳过该表格，不进行全表格提取")
-                # 不进行任何提取，直接跳过
+                print("    🚫 跳过该表格，不进行任何技能提取")
 
         # 去重和标准化
+        print(f"\n🔄 开始去重和标准化...")
+        print(f"    输入技能数量: {len(all_skills)}")
         final_skills = self._process_and_deduplicate_skills(all_skills)
+        print(f"    输出技能数量: {len(final_skills)}")
+
         return final_skills
 
     def _find_project_start_row(self, df: pd.DataFrame) -> Optional[int]:
@@ -161,273 +160,164 @@ class SkillsExtractor(BaseExtractor):
 
         return None
 
-    def _extract_skills_by_design_column_limited(
-        self, df: pd.DataFrame, min_design_row: int
-    ) -> Tuple[List[str], List[Dict]]:
-        """基于工程阶段列定位并提取技术列（限制在工程阶段之下）"""
-        skills = []
-
-        # Step 1: 找到包含"基本設計"等关键词的列位置（只在min_design_row之下搜索）
-        design_positions = self._find_design_column_positions_limited(
-            df, min_design_row
-        )
-        if not design_positions:
-            print("    未找到工程阶段列")
-            return skills, design_positions
-
-        print(f"    找到 {len(design_positions)} 个工程阶段列位置")
-
-        # Step 2: 对每个找到的设计列位置，向左查找所有技术列
-        for design_pos in design_positions:
-            # 找到所有技术列（不是只找一个）
-            tech_columns = self._find_all_tech_columns_left_limited(
-                df, design_pos, min_design_row
-            )
-
-            if tech_columns:
-                print(
-                    f"    从设计列 {design_pos['col']} (行{design_pos['row']}: {design_pos['value']}) 向左找到 {len(tech_columns)} 个技术列"
-                )
-
-                # Step 3: 提取每个技术列的内容
-                for tech_column in tech_columns:
-                    print(
-                        f"      提取列 {tech_column['col']} (类型: {tech_column.get('type', '未知')})"
-                    )
-                    column_skills = self._extract_entire_column_skills_limited(
-                        df, tech_column, min_design_row
-                    )
-                    skills.extend(column_skills)
-
-        return skills, design_positions
-
-    def _find_design_column_positions_limited(
+    def _extract_project_row_skills(
         self, df: pd.DataFrame, project_start_row: int
-    ) -> List[Dict]:
-        """查找包含工程阶段关键词的列位置（限制在project_start_row之下）"""
-        positions = []
-
-        # 从右向左扫描（优先查找右侧的列）
-        for col in range(len(df.columns) - 1, -1, -1):
-            for row in range(
-                project_start_row, len(df)
-            ):  # **关键修复：只搜索project_start_row之下**
-                cell = df.iloc[row, col]
-                if pd.notna(cell):
-                    cell_str = str(cell).strip()
-                    # 检查是否包含工程阶段关键词
-                    if any(keyword in cell_str for keyword in self.design_keywords):
-                        positions.append({"row": row, "col": col, "value": cell_str})
-                        break  # 该列已找到，继续下一列
-
-        return positions
-
-    def _find_all_tech_columns_left_limited(
-        self, df: pd.DataFrame, design_pos: Dict, project_start_row: int
-    ) -> List[Dict]:
-        """从设计列位置向左查找所有技术列（限制在project_start_row之下）"""
-        design_row = design_pos["row"]
-        design_col = design_pos["col"]
-        tech_columns = []
-
-        # **关键修复：确保搜索范围不超过project_start_row之上**
-        search_start_row = max(design_row, project_start_row)  # 取较大值
-        search_end_row = len(df)  # 搜索到表格末尾
-
-        print(f"      技能搜索范围: 第{search_start_row + 1}行 到 第{search_end_row}行")
-
-        # 从设计列向左逐列搜索
-        for col in range(design_col - 1, max(-1, design_col - 20), -1):
-            # 检查该列是否包含技术内容
-            tech_info = self._analyze_column_for_tech_limited(
-                df, col, search_start_row, search_end_row, project_start_row
-            )
-
-            if tech_info and tech_info["score"] >= 2:
-                tech_columns.append(tech_info)
-
-        return tech_columns
-
-    def _analyze_column_for_tech_limited(
-        self,
-        df: pd.DataFrame,
-        col: int,
-        start_row: int,
-        end_row: int,
-        project_start_row: int,
-    ) -> Optional[Dict]:
-        """分析某一列是否为技术列（限制在project_start_row之下）"""
-        tech_score = 0
-        tech_row_start = None
-        column_type = None
-        sample_skills = []
-
-        for row in range(start_row, end_row):
-            if (
-                row >= len(df) or row < project_start_row
-            ):  # **关键修复：确保不超过project_start_row之上**
-                continue
-
-            cell = df.iloc[row, col]
-            if pd.notna(cell):
-                cell_str = str(cell).strip()
-
-                # 检查列标题
-                if any(keyword in cell_str for keyword in self.tech_column_keywords):
-                    tech_score += 10
-
-                    # 识别列类型
-                    if any(k in cell_str for k in ["言語", "ツール", "プログラミング"]):
-                        column_type = "programming"
-                    elif "DB" in cell_str or "データベース" in cell_str:
-                        column_type = "database"
-                    elif "OS" in cell_str or "機種" in cell_str:
-                        column_type = "os"
-                    elif any(k in cell_str for k in ["Git", "SVN", "バージョン"]):
-                        column_type = "version_control"
-
-                    if tech_row_start is None:
-                        tech_row_start = row
-
-                # 检查是否包含技术内容
-                if self._cell_contains_tech_content(cell_str):
-                    tech_score += 1
-                    if tech_row_start is None:
-                        tech_row_start = row
-
-                    # 收集样本技能
-                    if len(sample_skills) < 5:
-                        extracted = self._extract_skills_from_text(cell_str)
-                        sample_skills.extend(extracted[:2])  # 只取前2个避免太多
-
-        # 如果该列技术分数足够高，返回信息
-        if tech_score >= 2:
-            return {
-                "col": col,
-                "start_row": max(
-                    tech_row_start or start_row, project_start_row
-                ),  # **确保起始行不超过project_start_row之上**
-                "score": tech_score,
-                "type": column_type or "general",
-                "sample_skills": sample_skills[:5],  # 保留前5个作为样本
-            }
-
-        return None
-
-    def _extract_entire_column_skills_limited(
-        self, df: pd.DataFrame, tech_column: Dict, project_start_row: int
     ) -> List[str]:
-        """提取整个技术列的所有技能（限制在project_start_row之下）"""
+        """提取项目经验行中的技能（专门处理项目数据行）- 修复版本"""
         skills = []
-        col = tech_column["col"]
-        start_row = max(
-            tech_column["start_row"], project_start_row
-        )  # **确保起始行不超过project_start_row之上**
 
-        print(f"        从行 {start_row + 1} 开始提取（限制在项目表头之下）")
+        print(f"    使用项目经验行提取方法（从第{project_start_row + 1}行之下）...")
 
-        # 提取该列从start_row开始的所有内容
-        consecutive_empty = 0
-        for row in range(start_row, len(df)):
-            cell = df.iloc[row, col]
-            if pd.notna(cell):
-                cell_str = str(cell).strip()
-                consecutive_empty = 0
+        # **关键修复：从project_start_row+1开始查找项目数据行**
+        for row in range(project_start_row + 1, len(df)):
+            row_data = df.iloc[row]
 
-                # 检查是否到达技能区域结束
-                if self._is_column_end(cell_str):
-                    break
+            # **修复：检查是否是项目数据行（第一列通常是项目编号）**
+            first_cell = row_data.iloc[0] if len(row_data) > 0 else None
+            if pd.notna(first_cell):
+                first_cell_str = str(first_cell).strip()
+                # 检查是否是数字项目编号
+                if first_cell_str.isdigit():
+                    print(
+                        f"        发现项目数据行: 第{row + 1}行，项目编号: {first_cell_str}"
+                    )
 
-                # 跳过职位标记
-                if cell_str.upper() in ["PM", "PL", "SL", "TL", "BSE", "SE", "PG"]:
-                    continue
+                    # **关键修复：查找包含技能的列**
+                    for col_idx in range(len(row_data)):
+                        cell = row_data.iloc[col_idx]
+                        if pd.notna(cell):
+                            cell_str = str(cell).strip()
 
-                # 处理多行内容（换行符分隔）
-                if "\n" in cell_str:
-                    lines = cell_str.split("\n")
-                    for line in lines:
-                        line_skills = self._extract_skills_from_text(line)
-                        skills.extend(line_skills)
-                else:
-                    # 单行内容
-                    cell_skills = self._extract_skills_from_text(cell_str)
-                    skills.extend(cell_skills)
-            else:
-                consecutive_empty += 1
-                # 如果连续5个空单元格，可能技能区域已结束
-                if consecutive_empty >= 5:
-                    break
+                            # **修复：检查是否包含换行符分隔的多个技能**
+                            if "\r\n" in cell_str or "\n" in cell_str:
+                                lines = re.split(r"\r?\n", cell_str)
+                                tech_lines = []
+                                for line in lines:
+                                    line = line.strip()
+                                    if line and self._is_likely_tech_skill(line):
+                                        tech_lines.append(line)
 
+                                if len(tech_lines) >= 2:  # 至少2个技能才认为是技能列
+                                    print(
+                                        f"            第{col_idx + 1}列包含{len(tech_lines)}个技能:"
+                                    )
+                                    for line in tech_lines:
+                                        if self._is_valid_skill(line):
+                                            normalized = self._normalize_skill_name(
+                                                line
+                                            )
+                                            skills.append(normalized)
+                                            print(
+                                                f"              - {line} -> {normalized}"
+                                            )
+
+                            # **修复：检查单个技能（数据库名等）**
+                            elif self._is_likely_single_tech_skill(cell_str):
+                                if self._is_valid_skill(cell_str):
+                                    normalized = self._normalize_skill_name(cell_str)
+                                    skills.append(normalized)
+                                    print(
+                                        f"            第{col_idx + 1}列单个技能: {cell_str} -> {normalized}"
+                                    )
+
+        print(f"    项目经验行提取完成，共找到 {len(skills)} 个技能")
         return skills
+
+    def _is_likely_tech_skill(self, text: str) -> bool:
+        """判断是否可能是技术技能"""
+        if not text or len(text) < 2 or len(text) > 30:
+            return False
+
+        # 排除明显非技能的内容
+        if text in ["●", "○", "◎", "△", "×"]:
+            return False
+        if text.isdigit():
+            return False
+        if text.upper() in ["PM", "PL", "SL", "TL", "BSE", "SE", "PG"]:
+            return False
+
+        # 常见技能模式
+        tech_patterns = [
+            r"^[A-Za-z][A-Za-z0-9\s\.\+\-]*$",  # 英文技能：Java, Spring Boot
+            r"^[A-Za-z][A-Za-z0-9]*\.[A-Za-z][A-Za-z0-9]*$",  # 如 Node.js
+            r"^[A-Za-z]+[0-9]*$",  # 如 HTML5
+        ]
+
+        return any(re.match(pattern, text) for pattern in tech_patterns)
+
+    def _is_likely_single_tech_skill(self, text: str) -> bool:
+        """判断是否可能是单个技术技能"""
+        # 常见的单个技能（数据库、操作系统等）
+        common_single_skills = [
+            "PostgreSQL",
+            "MySQL",
+            "Oracle",
+            "Windows",
+            "Linux",
+            "macOS",
+            "MongoDB",
+            "Redis",
+            "SQLite",
+            "DB2",
+            "Access",
+        ]
+
+        return text in common_single_skills or self._is_likely_tech_skill(text)
 
     def _extract_skills_from_horizontal_table_limited(
         self, df: pd.DataFrame, project_start_row: int
     ) -> List[str]:
         """
-        处理横向多列技能表格（限制在project_start_row之下）
-        针对每行包含多个技能的布局
+        处理横向多列技能表格（限制在project_start_row之下）- 修复版本
+        **只处理项目经验部分，不处理简历上半部分的技能表格**
         """
         skills = []
 
-        # 技能分类关键词
-        skill_category_keywords = ["言語", "DB", "FW", "ツール", "OS", "機種"]
+        print(
+            f"    使用横向表格提取方法（只处理第{project_start_row + 1}行之下的项目经验）..."
+        )
 
-        print(f"    使用横向表格提取方法（限制在第{project_start_row + 1}行之下）...")
-
-        # **关键修复：只查找project_start_row之下的技能相关行**
-        for row in range(project_start_row, len(df)):
+        # **修复：只查找project_start_row之下的项目经验区域**
+        for row in range(project_start_row + 1, len(df)):
             row_data = df.iloc[row]
 
-            # 检查该行是否包含技能分类标识
-            has_skill_category = False
-            category_found = ""
+            # 检查该行是否包含项目相关的技能信息
+            # 跳过项目数据行，查找项目说明行或其他包含技能的行
+            first_cell = row_data.iloc[0] if len(row_data) > 0 else None
 
-            for cell in row_data:
+            # 跳过项目编号行（由方法1处理）
+            if pd.notna(first_cell) and str(first_cell).strip().isdigit():
+                continue
+
+            # 查找包含技能的行
+            for col_idx, cell in enumerate(row_data):
                 if pd.notna(cell):
                     cell_str = str(cell).strip()
-                    for keyword in skill_category_keywords:
-                        if keyword in cell_str:
-                            has_skill_category = True
-                            category_found = keyword
-                            break
-                    if has_skill_category:
-                        break
 
-            if has_skill_category:
-                print(f"        处理技能行 {row + 1} ({category_found})")
+                    # 检查是否包含多个技能（用换行符分隔）
+                    if "\r\n" in cell_str or "\n" in cell_str:
+                        lines = re.split(r"\r?\n", cell_str)
+                        tech_count = 0
+                        for line in lines:
+                            line = line.strip()
+                            if line and self._is_likely_tech_skill(line):
+                                tech_count += 1
 
-                # 提取该行的所有技能
-                row_skills = []
-                for col_idx, cell in enumerate(row_data):
-                    if pd.notna(cell):
-                        cell_str = str(cell).strip()
+                        # 如果包含多个技能，提取它们
+                        if tech_count >= 2:
+                            print(
+                                f"        第{row + 1}行第{col_idx + 1}列包含{tech_count}个技能:"
+                            )
+                            for line in lines:
+                                line = line.strip()
+                                if line and self._is_likely_tech_skill(line):
+                                    if self._is_valid_skill(line):
+                                        normalized = self._normalize_skill_name(line)
+                                        skills.append(normalized)
+                                        print(f"            - {line} -> {normalized}")
 
-                        # 跳过分类标题和评价符号
-                        if not any(
-                            keyword in cell_str for keyword in skill_category_keywords
-                        ) and cell_str not in ["◎", "○", "△", "×", ""]:
-
-                            # 处理复合技能（如"Git,GitHub"）
-                            if "," in cell_str:
-                                sub_skills = [s.strip() for s in cell_str.split(",")]
-                                for sub_skill in sub_skills:
-                                    if sub_skill and self._is_valid_skill(sub_skill):
-                                        normalized = self._normalize_skill_name(
-                                            sub_skill
-                                        )
-                                        row_skills.append(normalized)
-                            else:
-                                if self._is_valid_skill(cell_str):
-                                    normalized = self._normalize_skill_name(cell_str)
-                                    row_skills.append(normalized)
-
-                skills.extend(row_skills)
-                print(f"            提取技能: {row_skills}")
-
+        print(f"    横向表格提取完成，共找到 {len(skills)} 个技能")
         return skills
-
-    # 移除不需要的方法，因为永远不进行全表格提取
-    # def _extract_skills_from_horizontal_table(self, df: pd.DataFrame) -> List[str]:
 
     def _extract_skills_fallback_limited(
         self, df: pd.DataFrame, project_start_row: int
@@ -459,63 +349,6 @@ class SkillsExtractor(BaseExtractor):
                     break
 
         return skills
-
-    # 以下方法保持不变，但添加必要的修复...
-
-    def _cell_contains_tech_content(self, cell_str: str) -> bool:
-        """检查单元格是否包含技术内容"""
-        # 快速检查常见技术关键词
-        tech_patterns = [
-            r"\b(Java|Python|JavaScript|PHP|Ruby|C\+\+|C#|Go|VB|COBOL)\b",
-            r"\b(Spring|React|Vue|Angular|Django|Rails|Node\.js|\.NET)\b",
-            r"\b(MySQL|PostgreSQL|Oracle|MongoDB|Redis|SQL\s*Server|DB2)\b",
-            r"\b(AWS|Azure|GCP|Docker|Kubernetes)\b",
-            r"\b(Git|SVN|Jenkins|Maven|TortoiseSVN|GitHub)\b",
-            r"\b(Windows|Linux|Unix|Ubuntu|CentOS|win\d+)\b",
-            r"\b(Eclipse|IntelliJ|VS\s*Code|Visual\s*Studio|NetBeans)\b",
-            r"(HTML|CSS|SQL|XML|JSON|TeraTerm)",
-        ]
-
-        cell_upper = cell_str.upper()
-        for pattern in tech_patterns:
-            if re.search(pattern, cell_str, re.IGNORECASE):
-                return True
-
-        # 检查是否包含预定义的有效技能
-        for skill in VALID_SKILLS:
-            if skill.upper() in cell_upper:
-                return True
-
-        # 特殊情况：单独的"SE"或"PG"不算技能，但在技术列中可能出现
-        if cell_str in ["SE", "PG", "PL", "PM"]:
-            return False
-
-        return False
-
-    def _is_column_end(self, cell_str: str) -> bool:
-        """判断是否到达技术列结束"""
-        # 如果遇到这些内容，说明技能区域结束
-        end_markers = [
-            "プロジェクト",
-            "案件",
-            "経歴",
-            "実績",
-            "期間",
-            "業務内容",
-            "担当",
-            "概要",
-            "備考",
-            "その他",
-            "職歴",
-            "経験",
-            "資格",
-        ]
-
-        # 日期格式也表示新的项目开始
-        if re.match(r"^\d{4}[年/]\d{1,2}[月/]", cell_str):
-            return True
-
-        return any(marker in cell_str for marker in end_markers)
 
     def _extract_skills_from_text(self, text: str) -> List[str]:
         """从文本中提取技能"""
@@ -868,6 +701,7 @@ class SkillsExtractor(BaseExtractor):
             "eclipse": "Eclipse",
             "Eclipse": "Eclipse",
             "ECLIPSE": "Eclipse",
+            "eclipes": "Eclipse",  # **修复拼写错误**
             "vscode": "VS Code",
             "Vscode": "VS Code",
             "VSCode": "VS Code",
@@ -931,6 +765,21 @@ class SkillsExtractor(BaseExtractor):
             "Android": "Android",
             "android": "Android",
             "ANDROID": "Android",
+            # 协作工具
+            "slack": "Slack",
+            "Slack": "Slack",
+            "SLACK": "Slack",
+            "teams": "Teams",
+            "Teams": "Teams",
+            "TEAMS": "Teams",
+            "ovice": "oVice",
+            "Ovice": "oVice",
+            "oVice": "oVice",
+            # 其他工具
+            "teraterm": "TeraTerm",
+            "TeraTerm": "TeraTerm",
+            "TERATERM": "TeraTerm",
+            "Tera Term": "TeraTerm",
         }
 
         # 检查映射
@@ -987,3 +836,110 @@ class SkillsExtractor(BaseExtractor):
             if row_text.strip():
                 text_parts.append(row_text)
         return "\n".join(text_parts)
+
+    # 保持兼容性的方法（避免其他地方调用出错）
+    def _find_min_design_row(self, df: pd.DataFrame) -> Optional[int]:
+        """兼容性方法：重定向到新的项目表头查找方法"""
+        return self._find_project_start_row(df)
+
+    def _extract_skills_by_design_column(
+        self, df: pd.DataFrame
+    ) -> Tuple[List[str], List[Dict]]:
+        """基于工程阶段列定位并提取技术列（保持兼容性）"""
+        return [], []
+
+    def _find_skills_in_merged_cells(
+        self, df: pd.DataFrame, design_positions: List[Dict]
+    ) -> List[str]:
+        """查找合并单元格中的技能（备用方法）"""
+        skills = []
+
+        # 获取最早的设计行位置（如果有的话）
+        min_design_row = 0
+        if design_positions:
+            min_design_row = min(pos["row"] for pos in design_positions)
+
+        for row in range(min_design_row, len(df)):  # 只搜索设计行下方
+            for col in range(len(df.columns)):
+                cell = df.iloc[row, col]
+                if pd.notna(cell) and "\n" in str(cell):
+                    cell_str = str(cell)
+                    lines = cell_str.split("\n")
+
+                    # 计算包含技能的行数
+                    skill_count = 0
+                    for line in lines:
+                        if self._cell_contains_tech_content(line):
+                            skill_count += 1
+
+                    # 如果多行包含技能，提取所有
+                    if skill_count >= 3:
+                        for line in lines:
+                            line_skills = self._extract_skills_from_text(line)
+                            skills.extend(line_skills)
+
+        return skills
+
+    def _extract_skills_fallback(
+        self, df: pd.DataFrame, design_positions: List[Dict]
+    ) -> List[str]:
+        """全文搜索技能（最后的备用方法）"""
+        skills = []
+
+        # 只搜索设计行下方的文本
+        min_design_row = 0
+        if design_positions:
+            min_design_row = min(pos["row"] for pos in design_positions)
+
+        # 只将设计行下方的内容转换为文本
+        text_parts = []
+        for idx in range(min_design_row, len(df)):
+            row = df.iloc[idx]
+            row_text = " ".join([str(cell) for cell in row if pd.notna(cell)])
+            if row_text.strip():
+                text_parts.append(row_text)
+
+        text = "\n".join(text_parts)
+
+        for skill in VALID_SKILLS:
+            patterns = [
+                rf"\b{re.escape(skill)}\b",
+                rf"(?:^|\s|[、,，/]){re.escape(skill)}(?:$|\s|[、,，/])",
+            ]
+
+            for pattern in patterns:
+                if re.search(pattern, text, re.IGNORECASE):
+                    skills.append(skill)
+                    break
+
+        return skills
+
+    def _cell_contains_tech_content(self, cell_str: str) -> bool:
+        """检查单元格是否包含技术内容"""
+        # 快速检查常见技术关键词
+        tech_patterns = [
+            r"\b(Java|Python|JavaScript|PHP|Ruby|C\+\+|C#|Go|VB|COBOL)\b",
+            r"\b(Spring|React|Vue|Angular|Django|Rails|Node\.js|\.NET)\b",
+            r"\b(MySQL|PostgreSQL|Oracle|MongoDB|Redis|SQL\s*Server|DB2)\b",
+            r"\b(AWS|Azure|GCP|Docker|Kubernetes)\b",
+            r"\b(Git|SVN|Jenkins|Maven|TortoiseSVN|GitHub)\b",
+            r"\b(Windows|Linux|Unix|Ubuntu|CentOS|win\d+)\b",
+            r"\b(Eclipse|IntelliJ|VS\s*Code|Visual\s*Studio|NetBeans)\b",
+            r"(HTML|CSS|SQL|XML|JSON|TeraTerm)",
+        ]
+
+        cell_upper = cell_str.upper()
+        for pattern in tech_patterns:
+            if re.search(pattern, cell_str, re.IGNORECASE):
+                return True
+
+        # 检查是否包含预定义的有效技能
+        for skill in VALID_SKILLS:
+            if skill.upper() in cell_upper:
+                return True
+
+        # 特殊情况：单独的"SE"或"PG"不算技能，但在技术列中可能出现
+        if cell_str in ["SE", "PG", "PL", "PM"]:
+            return False
+
+        return False
