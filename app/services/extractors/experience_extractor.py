@@ -241,8 +241,8 @@ class ExperienceExtractor(BaseExtractor):
             print(f"   ❌ 经验月数不合理: {total_months}")
             return None
         elif experience_years > 40:
-            print(f"   ⚠️  经验年数过长: {experience_years:.1f} 年，限制为20年")
-            total_months = min(total_months, 20 * 12)
+            print(f"   ⚠️  经验年数过长: {experience_years:.1f} 年，限制为40年")
+            total_months = min(total_months, 40 * 12)
             experience_years = total_months / 12
 
         # 🆕 新增：减去研修时间
