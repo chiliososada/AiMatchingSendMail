@@ -134,6 +134,9 @@ class SkillsExtractor(BaseExtractor):
         ]
 
         final_skills = self._split_valid_skills(final_skills)
+
+        final_skills = self._extract_after_colon(final_skills)
+
         print(f"    输出技能数量: {len(final_skills)}")
 
         return final_skills
@@ -1038,6 +1041,41 @@ class SkillsExtractor(BaseExtractor):
             return False
 
         return False
+
+    def _extract_after_colon(self, skills_list):
+        """
+        最简单的实现：提取冒号后面的内容
+
+        Args:
+            skills_list: 原始技能列表
+
+        Returns:
+            提取冒号后内容的列表
+        """
+        result = []
+
+        for skill in skills_list:
+            if skill is None:
+                continue
+
+            skill_str = str(skill).strip()
+
+            # 检查是否有冒号（英文或中文）
+            if ":" in skill_str:
+                # 英文冒号，取后面的部分
+                after_colon = skill_str.split(":", 1)[1].strip()
+                if after_colon:  # 确保不是空的
+                    result.append(after_colon)
+            elif "：" in skill_str:
+                # 中文冒号，取后面的部分
+                after_colon = skill_str.split("：", 1)[1].strip()
+                if after_colon:  # 确保不是空的
+                    result.append(after_colon)
+            else:
+                # 没有冒号，直接保留
+                result.append(skill_str)
+
+        return result
 
     def _split_valid_skills(self, final_skills):
         """
