@@ -7,7 +7,7 @@ import re
 
 from base.base_extractor import BaseExtractor
 from base.constants import KEYWORDS
-from utils.validation_utils import is_valid_name
+from app.utils.validation_utils import is_valid_name
 
 
 class NameExtractor(BaseExtractor):

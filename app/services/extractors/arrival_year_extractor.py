@@ -9,7 +9,7 @@ import re
 
 from base.base_extractor import BaseExtractor
 from base.constants import KEYWORDS
-from utils.date_utils import convert_excel_serial_to_date
+from app.utils.date_utils import convert_excel_serial_to_date
 
 
 class ArrivalYearExtractor(BaseExtractor):

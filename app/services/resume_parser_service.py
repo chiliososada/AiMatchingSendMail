@@ -151,29 +151,81 @@ class ResumeParserService:
         """同步提取所有信息"""
         result = {}
 
+        # 添加调试日志
+        logger.info(f"开始提取信息，数据集数量: {len(all_data)}")
+
+        # 验证数据结构
+        for i, data in enumerate(all_data):
+            logger.info(f"Sheet {i}: {data.get('sheet_name', 'Unknown')}")
+            logger.info(f"  - 包含df: {'df' in data}")
+            logger.info(f"  - 包含text: {'text' in data}")
+            if "df" in data:
+                df = data["df"]
+                logger.info(f"  - DataFrame形状: {df.shape}")
+                # 打印前几行数据用于调试
+                logger.info(f"  - 前3行数据预览:")
+                for idx in range(min(3, len(df))):
+                    row_text = " ".join(
+                        [str(cell) for cell in df.iloc[idx] if pd.notna(cell)]
+                    )[:100]
+                    logger.info(f"    行{idx}: {row_text}...")
+
         # 按顺序提取各项信息
         result["name"] = self.name_extractor.extract(all_data)
+        logger.info(f"姓名提取结果: {result['name']}")
+
         result["gender"] = self.gender_extractor.extract(all_data)
+        logger.info(f"性别提取结果: {result['gender']}")
+
         result["birthdate"] = self.birthdate_extractor.extract(all_data)
+        logger.info(f"生日提取结果: {result['birthdate']}")
+
         result["age"] = self.age_extractor.extract(all_data, result["birthdate"])
+        logger.info(f"年龄提取结果: {result['age']}")
+
         result["nationality"] = self.nationality_extractor.extract(all_data)
+        logger.info(f"国籍提取结果: {result['nationality']}")
+
         result["arrival_year_japan"] = self.arrival_year_extractor.extract(
             all_data, result["birthdate"]
         )
+        logger.info(f"来日年份提取结果: {result['arrival_year_japan']}")
+
         result["experience"] = self.experience_extractor.extract(all_data)
+        logger.info(f"经验提取结果: {result['experience']}")
+
         result["japanese_level"] = self.japanese_level_extractor.extract(all_data)
+        logger.info(f"日语水平提取结果: {result['japanese_level']}")
+
         result["skills"] = self.skills_extractor.extract(all_data)
+        logger.info(
+            f"技能提取结果: {len(result['skills']) if result['skills'] else 0}个"
+        )
+
         result["work_scope"] = self.work_scope_extractor.extract(all_data)
+        logger.info(f"工作范围提取结果: {result['work_scope']}")
+
         result["roles"] = self.role_extractor.extract(all_data)
+        logger.info(f"角色提取结果: {result['roles']}")
 
         return result
 
     async def _post_process(self, result: Dict[str, Any]) -> Dict[str, Any]:
         """后处理结果"""
-        # 确保所有None值正确处理
+        # 确保所有None值和空字符串正确处理
         for key, value in result.items():
-            if value is None or (isinstance(value, list) and len(value) == 0):
+            if (
+                value is None
+                or value == ""
+                or (isinstance(value, list) and len(value) == 0)
+            ):
                 result[key] = None
+            elif isinstance(value, str):
+                # 去除空白字符
+                value = value.strip()
+                result[key] = value if value else None
+            else:
+                result[key] = value
 
         # 技能去重
         if result.get("skills"):

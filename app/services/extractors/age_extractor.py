@@ -9,7 +9,10 @@ import re
 
 from base.base_extractor import BaseExtractor
 from base.constants import KEYWORDS
-from utils.date_utils import convert_excel_serial_to_date, calculate_age_from_birthdate
+from app.utils.date_utils import (
+    convert_excel_serial_to_date,
+    calculate_age_from_birthdate,
+)
 
 
 class AgeExtractor(BaseExtractor):

@@ -7,7 +7,7 @@ import pandas as pd
 import re
 
 from base.base_extractor import BaseExtractor
-from utils.date_utils import convert_excel_serial_to_date
+from app.utils.date_utils import convert_excel_serial_to_date
 
 
 class BirthdateExtractor(BaseExtractor):
