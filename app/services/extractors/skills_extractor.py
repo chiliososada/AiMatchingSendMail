@@ -244,9 +244,10 @@ class SkillsExtractor(BaseExtractor):
         if text.upper() in ["PM", "PL", "SL", "TL", "BSE", "SE", "PG"]:
             return False
 
+        # 🔥 修复：添加对括号的支持
         # 常见技能模式
         tech_patterns = [
-            r"^[A-Za-z][A-Za-z0-9\s\.\+\-]*$",  # 英文技能：Java, Spring Boot
+            r"^[A-Za-z#][A-Za-z0-9#\s\.\+\-\(\)]*$",  # 🔥 添加了 # 和 \(\) 支持 C# ASP.NET(MVC 5)
             r"^[A-Za-z][A-Za-z0-9]*\.[A-Za-z][A-Za-z0-9]*$",  # 如 Node.js
             r"^[A-Za-z]+[0-9]*$",  # 如 HTML5
         ]
@@ -474,8 +475,8 @@ class SkillsExtractor(BaseExtractor):
             return False
 
         # 排除包含括号的技能（半角和全角）
-        if any(bracket in skill for bracket in ["(", ")", "（", "）"]):
-            return False
+        # if any(bracket in skill for bracket in ["(", ")", "（", "）"]):
+        #     return False
 
         # 排除包含日文关键词的非技能内容
         exclude_japanese_keywords = [
