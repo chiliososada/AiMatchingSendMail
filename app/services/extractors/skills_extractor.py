@@ -904,12 +904,59 @@ class SkillsExtractor(BaseExtractor):
 
     def _process_and_deduplicate_skills(self, skills: List[str]) -> List[str]:
         """处理和去重技能列表"""
+        # 🔥 第一步：预处理 - 合并 Visual Studio + Code
+        processed_skills = []
+        i = 0
+        while i < len(skills):
+            if not skills[i]:
+                i += 1
+                continue
+
+            skill = skills[i].strip()
+
+            # 检查是否是 "Visual Studio" 且下一个是 "Code"
+            if (
+                skill == "Visual Studio"
+                and i + 1 < len(skills)
+                and skills[i + 1]
+                and skills[i + 1].strip() == "Code"
+            ):
+                processed_skills.append("Visual Studio Code")
+                i += 2  # 跳过下一个 "Code"
+            else:
+                processed_skills.append(skill)
+                i += 1
+
+        # 🔥 第二步：规范化处理
         final_skills = []
         seen_lower = set()
 
-        for skill in skills:
+        for skill in processed_skills:
             if not skill:
                 continue
+
+            # Windows/Linux 规范化逻辑
+            skill_lower = skill.lower()
+            if any(
+                keyword in skill_lower
+                for keyword in ["windows", "ウィンドウズ", "開発windows"]
+            ):
+                skill = "Windows"
+            elif any(
+                keyword in skill_lower
+                for keyword in ["linux", "リナックス", "サーバーlinux"]
+            ):
+                skill = "Linux"
+
+            # Visual Studio Code 规范化逻辑
+            vs_code_variants = [
+                "visual studio code",
+                "vs code",
+                "vscode",
+                "visualstudiocode",
+            ]
+            if any(variant in skill_lower for variant in vs_code_variants):
+                skill = "Visual Studio Code"
 
             normalized = self._normalize_skill_name(skill)
             normalized_lower = normalized.lower()
@@ -1206,127 +1253,3 @@ class SkillsExtractor(BaseExtractor):
                 result.append(skill_str)
 
         return result
-
-    # def _split_valid_skills(self, final_skills):
-    #     """
-    #     智能拆分技能列表中的复合技能
-    #     这个方法可以直接添加到 SkillsExtractor 类中
-    #     """
-    #     # 导入有效技能列表
-    #     try:
-    #         from app.base.constants import VALID_SKILLS
-    #     except ImportError:
-    #         try:
-    #             from app.utils.resume_constants import VALID_SKILLS
-    #         except ImportError:
-    #             # 使用内置的核心技能列表
-    #             VALID_SKILLS = {
-    #                 "Java",
-    #                 "Python",
-    #                 "JavaScript",
-    #                 "TypeScript",
-    #                 "C",
-    #                 "C++",
-    #                 "C#",
-    #                 "PHP",
-    #                 "Ruby",
-    #                 "Go",
-    #                 "Eclipse",
-    #                 "IntelliJ",
-    #                 "VS Code",
-    #                 "React",
-    #                 "Vue",
-    #                 "Angular",
-    #                 "Spring",
-    #                 "SpringBoot",
-    #                 "Node.js",
-    #                 "MySQL",
-    #                 "PostgreSQL",
-    #                 "Oracle",
-    #                 "MongoDB",
-    #                 "Git",
-    #                 "GitHub",
-    #                 "SVN",
-    #                 "Docker",
-    #                 "AWS",
-    #                 "Azure",
-    #                 "HTML",
-    #                 "CSS",
-    #                 "Bootstrap",
-    #                 "jQuery",
-    #             }
-
-    #     if not final_skills:
-    #         return final_skills
-
-    #     # 处理 VALID_SKILLS 的不同格式
-    #     if isinstance(VALID_SKILLS, (list, tuple)):
-    #         valid_skills_set = set(VALID_SKILLS)
-    #     else:
-    #         valid_skills_set = VALID_SKILLS
-
-    #     # 创建不区分大小写的映射
-    #     skill_mapping = {}
-    #     for skill in valid_skills_set:
-    #         if isinstance(skill, str):
-    #             skill_mapping[skill.lower()] = skill
-
-    #     result_skills = []
-
-    #     for skill in final_skills:
-    #         if not skill or not isinstance(skill, str):
-    #             continue
-
-    #         skill = skill.strip()
-    #         if not skill:
-    #             continue
-
-    #         # 按空格拆分
-    #         parts = skill.split()
-
-    #         if len(parts) <= 1:
-    #             # 单个词，直接添加
-    #             result_skills.append(skill)
-    #         else:
-    #             # 多个词，检查拆分
-    #             valid_parts = []
-
-    #             for part in parts:
-    #                 part_clean = part.strip()
-    #                 if part_clean.lower() in skill_mapping:
-    #                     # 使用标准格式的技能名称
-    #                     valid_parts.append(skill_mapping[part_clean.lower()])
-    #                 else:
-    #                     # 检查常见变体
-    #                     variants = {
-    #                         "eclipse": "Eclipse",
-    #                         "eclipes": "Eclipse",
-    #                         "intellij": "IntelliJ",
-    #                         "vscode": "VS Code",
-    #                         "github": "GitHub",
-    #                         "springboot": "SpringBoot",
-    #                         "nodejs": "Node.js",
-    #                         "mysql": "MySQL",
-    #                     }
-
-    #                     if part_clean.lower() in variants:
-    #                         valid_parts.append(variants[part_clean.lower()])
-
-    #             if len(valid_parts) >= 2:
-    #                 # 成功拆分为多个有效技能
-    #                 print(f"🔧 拆分技能: '{skill}' -> {valid_parts}")
-    #                 result_skills.extend(valid_parts)
-    #             else:
-    #                 # 无法有效拆分，保持原样
-    #                 result_skills.append(skill)
-
-    #     # 去重
-    #     seen = set()
-    #     final_result = []
-
-    #     for skill in result_skills:
-    #         if skill and skill.lower() not in seen:
-    #             seen.add(skill.lower())
-    #             final_result.append(skill)
-
-    #     return final_result
