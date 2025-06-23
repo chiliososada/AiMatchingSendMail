@@ -44,6 +44,10 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "your-secret-key-change-in-production"
     ENCRYPTION_KEY: Optional[str] = None
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8
+    
+    # API Key 认证配置
+    API_KEY: Optional[str] = None
+    REQUIRE_API_KEY: bool = False
 
     # CORS配置
     BACKEND_CORS_ORIGINS: List[str] = [

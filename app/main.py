@@ -1,15 +1,17 @@
 # app/main.py - asyncpg版本
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.security import APIKeyHeader
 import logging
 import time
 from pathlib import Path
 import os
 import asyncio
+from typing import Optional
 
 from .config import settings
 from .api.email_routes import router as email_router
@@ -35,6 +37,15 @@ TEMP_DIR = UPLOAD_DIR / "temp"
 for directory in [UPLOAD_DIR, ATTACHMENT_DIR, TEMP_DIR]:
     directory.mkdir(parents=True, exist_ok=True)
 
+# 定义API Key认证方案
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+async def get_api_key(api_key: str = Depends(api_key_header)):
+    """验证API Key"""
+    if settings.REQUIRE_API_KEY:
+        if not api_key or api_key != settings.API_KEY:
+            raise HTTPException(status_code=401, detail="Invalid API Key")
+    return api_key
 
 # 创建FastAPI应用
 app = FastAPI(
@@ -70,6 +81,73 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
+# 添加API Key安全方案到OpenAPI schema
+if settings.REQUIRE_API_KEY:
+    from fastapi.openapi.utils import get_openapi
+    
+    def custom_openapi():
+        if app.openapi_schema:
+            return app.openapi_schema
+        openapi_schema = get_openapi(
+            title=app.title,
+            version=app.version,
+            description=app.description,
+            routes=app.routes,
+        )
+        openapi_schema["components"]["securitySchemes"] = {
+            "ApiKeyAuth": {
+                "type": "apiKey",
+                "in": "header",
+                "name": "X-API-Key"
+            }
+        }
+        # 为所有API路径添加安全要求（除了排除的路径）
+        excluded_paths = ["/", "/health", "/info", "/quick-test"]
+        for path, path_item in openapi_schema["paths"].items():
+            if path not in excluded_paths:
+                for method in path_item:
+                    if method in ["get", "post", "put", "delete", "patch"]:
+                        path_item[method]["security"] = [{"ApiKeyAuth": []}]
+        
+        app.openapi_schema = openapi_schema
+        return app.openapi_schema
+    
+    app.openapi = custom_openapi
+
+# API Key 认证中间件
+@app.middleware("http")
+async def api_key_middleware(request: Request, call_next):
+    """API Key 认证中间件"""
+    # 如果启用了API Key验证
+    if settings.REQUIRE_API_KEY:
+        # 跳过文档路径和健康检查
+        excluded_paths = ["/docs", "/redoc", "/openapi.json", "/api/v1/openapi.json", "/health", "/", "/info", "/quick-test"]
+        # 同时检查路径前缀，处理静态文件和文档相关请求
+        excluded_prefixes = ["/docs", "/redoc", "/static"]
+        
+        if (request.url.path in excluded_paths or 
+            any(request.url.path.startswith(prefix) for prefix in excluded_prefixes)):
+            response = await call_next(request)
+            return response
+        
+        # 从请求头获取API Key
+        api_key = request.headers.get("X-API-Key")
+        
+        if not api_key:
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Missing API Key. Please provide X-API-Key header."}
+            )
+        
+        if api_key != settings.API_KEY:
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Invalid API Key"}
+            )
+    
+    response = await call_next(request)
+    return response
+
 # 添加中间件
 
 # CORS中间件
@@ -78,7 +156,7 @@ app.add_middleware(
     allow_origins=settings.BACKEND_CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-    allow_headers=["*"],
+    allow_headers=["*", "X-API-Key"],
     expose_headers=["*"],
 )
 
