@@ -165,6 +165,28 @@ class AIMatchingDatabase:
 
         return await fetch_all(base_query, *params)
 
+    async def get_all_active_engineers(
+        self, tenant_id: UUID
+    ) -> List[Dict[str, Any]]:
+        """获取所有活跃的工程师（用于生成embeddings）"""
+        query = """
+        SELECT * FROM engineers 
+        WHERE tenant_id = $1 AND is_active = true
+        ORDER BY created_at DESC LIMIT 1000
+        """
+        return await fetch_all(query, tenant_id)
+
+    async def get_all_active_projects(
+        self, tenant_id: UUID
+    ) -> List[Dict[str, Any]]:
+        """获取所有活跃的项目（用于生成embeddings）"""
+        query = """
+        SELECT * FROM projects 
+        WHERE tenant_id = $1 AND is_active = true
+        ORDER BY created_at DESC LIMIT 1000
+        """
+        return await fetch_all(query, tenant_id)
+
     # ========== 相似度计算（数据库层） ==========
 
     async def calculate_similarities_by_database(
@@ -622,8 +644,7 @@ class AIMatchingDatabase:
         
         try:
             query = """
-            SELECT id, title, description, required_skills, preferred_skills,
-                   experience_required, japanese_level_required
+            SELECT id, title, description, skills, experience, japanese_level
             FROM projects
             WHERE id = ANY($1::uuid[]) 
             AND tenant_id = $2
@@ -663,8 +684,7 @@ class AIMatchingDatabase:
         
         try:
             query = """
-            SELECT id, name, skills, experience, japanese_level, 
-                   current_status, work_scope, role
+            SELECT id, name, skills, experience, japanese_level
             FROM engineers
             WHERE id = ANY($1::uuid[]) 
             AND tenant_id = $2

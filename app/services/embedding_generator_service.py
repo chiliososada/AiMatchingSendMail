@@ -85,46 +85,16 @@ class EmbeddingGeneratorService:
         Returns:
             str: 用于向量化的文本
         """
-        parts = []
-        
-        # 项目标题
-        if project.get("title"):
-            parts.append(f"项目: {project['title']}")
-        
-        # 项目描述
-        if project.get("description"):
-            description = str(project["description"])[:200]  # 限制长度
-            parts.append(f"描述: {description}")
-        
-        # 技能要求
-        if project.get("required_skills"):
-            skills = project["required_skills"]
+        # 只使用技能字段
+        if project.get("skills"):
+            skills = project["skills"]
             if isinstance(skills, list):
-                parts.append(f"必需技能: {', '.join(skills)}")
+                return ", ".join(skills)
             elif isinstance(skills, str):
-                parts.append(f"必需技能: {skills}")
+                return skills
         
-        # 优选技能
-        if project.get("preferred_skills"):
-            skills = project["preferred_skills"]
-            if isinstance(skills, list):
-                parts.append(f"优选技能: {', '.join(skills)}")
-            elif isinstance(skills, str):
-                parts.append(f"优选技能: {skills}")
-        
-        # 经验要求
-        if project.get("experience_required"):
-            parts.append(f"经验要求: {project['experience_required']}")
-        
-        # 日语水平要求
-        if project.get("japanese_level_required"):
-            parts.append(f"日语要求: {project['japanese_level_required']}")
-        
-        # 如果没有任何有用信息，返回默认文本
-        if not parts:
-            return "项目信息不完整"
-        
-        return " | ".join(parts)
+        # 如果没有技能信息，返回默认文本
+        return "无技能信息"
     
     def create_engineer_paraphrase(self, engineer: Dict[str, Any]) -> str:
         """
@@ -136,46 +106,16 @@ class EmbeddingGeneratorService:
         Returns:
             str: 用于向量化的文本
         """
-        parts = []
-        
-        # 工程师姓名
-        if engineer.get("name"):
-            parts.append(f"工程师: {engineer['name']}")
-        
-        # 技能
+        # 只使用技能字段
         if engineer.get("skills"):
             skills = engineer["skills"]
             if isinstance(skills, list):
-                parts.append(f"技能: {', '.join(skills)}")
+                return ", ".join(skills)
             elif isinstance(skills, str):
-                parts.append(f"技能: {skills}")
+                return skills
         
-        # 经验描述
-        if engineer.get("experience"):
-            experience = str(engineer["experience"])[:200]  # 限制长度
-            parts.append(f"经验: {experience}")
-        
-        # 日语水平
-        if engineer.get("japanese_level"):
-            parts.append(f"日语: {engineer['japanese_level']}")
-        
-        # 当前状态
-        if engineer.get("current_status"):
-            parts.append(f"状态: {engineer['current_status']}")
-        
-        # 工作范围偏好
-        if engineer.get("work_scope"):
-            parts.append(f"工作范围: {engineer['work_scope']}")
-        
-        # 角色类型
-        if engineer.get("role"):
-            parts.append(f"角色: {engineer['role']}")
-        
-        # 如果没有任何有用信息，返回默认文本
-        if not parts:
-            return "工程师信息不完整"
-        
-        return " | ".join(parts)
+        # 如果没有技能信息，返回默认文本
+        return "无技能信息"
     
     def generate_embeddings(self, texts: List[str]) -> List[str]:
         """

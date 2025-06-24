@@ -56,6 +56,7 @@ class AIMatchingService:
         target_info: Dict[str, Any],
         target_type: str,  # 'project' 或 'engineer'
         max_matches: int,
+        tenant_id: UUID,
     ) -> List[MatchResult]:
         """
         从数据库相似度结果创建MatchResult对象
@@ -84,7 +85,9 @@ class AIMatchingService:
                     # 工程师匹配项目
                     project_id = result["id"]
                     engineer_id = target_info["id"]
-                    project_title = result.get("title", "")  # 这里实际应该是title
+                    # 需要从数据库获取项目信息
+                    project_info = await self.db.get_project_info(project_id, tenant_id)
+                    project_title = project_info.get("title", "") if project_info else ""
                     engineer_name = target_info.get("name", "")
 
                 # 简化版：直接使用相似度分数作为匹配分数
@@ -323,7 +326,13 @@ class AIMatchingService:
                 if not project_info.get("ai_match_embedding"):
                     raise ValueError(f"项目向量生成失败: {request.project_id}")
 
-                # 获取候选工程师
+                # 首先获取所有活跃工程师ID并生成embeddings
+                all_engineers = await self.db.get_all_active_engineers(request.tenant_id)
+                if all_engineers:
+                    all_engineer_ids = [e["id"] for e in all_engineers]
+                    await self._ensure_engineer_embeddings(all_engineer_ids, request.tenant_id)
+
+                # 获取候选工程师（现在所有活跃工程师都应该有embeddings了）
                 candidate_engineers = await self.db.get_candidate_engineers(
                     request.tenant_id, request.filters or {}
                 )
@@ -357,6 +366,7 @@ class AIMatchingService:
                         target_info=project_info,
                         target_type="project",
                         max_matches=request.max_matches,
+                        tenant_id=request.tenant_id,
                     )
 
                 # 保存匹配结果
@@ -453,7 +463,13 @@ class AIMatchingService:
                 if not engineer_info.get("ai_match_embedding"):
                     raise ValueError(f"工程师向量生成失败: {request.engineer_id}")
 
-                # 获取候选项目
+                # 首先获取所有活跃项目ID并生成embeddings
+                all_projects = await self.db.get_all_active_projects(request.tenant_id)
+                if all_projects:
+                    all_project_ids = [p["id"] for p in all_projects]
+                    await self._ensure_project_embeddings(all_project_ids, request.tenant_id)
+
+                # 获取候选项目（现在所有活跃项目都应该有embeddings了）
                 candidate_projects = await self.db.get_candidate_projects(
                     request.tenant_id, request.filters or {}
                 )
@@ -487,6 +503,7 @@ class AIMatchingService:
                         target_info=engineer_info,
                         target_type="engineer",
                         max_matches=request.max_matches,
+                        tenant_id=request.tenant_id,
                     )
 
                 # 保存匹配结果
@@ -657,6 +674,7 @@ class AIMatchingService:
                                 target_info=project,
                                 target_type="project",
                                 max_matches=request.max_matches,
+                                tenant_id=request.tenant_id,
                             )
                         )
 
