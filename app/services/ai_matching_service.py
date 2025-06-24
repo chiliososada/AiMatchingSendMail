@@ -10,8 +10,10 @@ import logging
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 from uuid import UUID, uuid4
+from fastapi import HTTPException
 
 from .ai_matching_database import AIMatchingDatabase
+from .embedding_generator_service import embedding_service
 from ..schemas.ai_matching_schemas import (
     ProjectToEngineersMatchRequest,
     EngineerToProjectsMatchRequest,
@@ -134,6 +136,152 @@ class AIMatchingService:
 
         return matches
 
+    # ========== 向量生成相关方法 ==========
+
+    async def _ensure_project_embeddings(
+        self, project_ids: List[UUID], tenant_id: UUID
+    ) -> None:
+        """
+        检查并生成缺失的项目向量
+        
+        Args:
+            project_ids: 项目ID列表
+            tenant_id: 租户ID
+        """
+        try:
+            # 获取缺失向量的项目
+            projects_missing = await self.db.get_projects_with_embeddings(
+                project_ids, tenant_id
+            )
+            
+            if not projects_missing:
+                logger.debug("所有项目都已有向量，无需生成")
+                return
+            
+            logger.info(f"发现 {len(projects_missing)} 个项目缺失向量，开始生成...")
+            
+            # 分批处理
+            project_data_list = list(projects_missing.values())
+            batches = self._batch_items(project_data_list)
+            
+            total_updated = 0
+            
+            for batch_idx, batch in enumerate(batches):
+                logger.info(f"处理项目向量生成批次 {batch_idx + 1}/{len(batches)} ({len(batch)} 个项目)")
+                
+                # 生成paraphrase文本
+                paraphrases = []
+                for project in batch:
+                    paraphrase = embedding_service.create_project_paraphrase(project)
+                    paraphrases.append(paraphrase)
+                
+                # 生成向量
+                embeddings = embedding_service.generate_embeddings(paraphrases)
+                
+                # 准备更新数据
+                update_data = []
+                for project, paraphrase, embedding in zip(batch, paraphrases, embeddings):
+                    update_data.append({
+                        "id": project["id"],
+                        "paraphrase": paraphrase,
+                        "embedding": embedding
+                    })
+                
+                # 批量更新数据库
+                updated_count = await self.db.update_project_embeddings(update_data)
+                total_updated += updated_count
+                
+                logger.info(f"批次 {batch_idx + 1} 完成，更新了 {updated_count} 个项目向量")
+            
+            logger.info(f"✅ 项目向量生成完成，总计更新: {total_updated}/{len(projects_missing)}")
+            
+        except Exception as e:
+            logger.error(f"❌ 项目向量生成失败: {str(e)}")
+            raise HTTPException(
+                status_code=500, 
+                detail=f"项目向量生成失败: {str(e)}"
+            )
+
+    async def _ensure_engineer_embeddings(
+        self, engineer_ids: List[UUID], tenant_id: UUID
+    ) -> None:
+        """
+        检查并生成缺失的工程师向量
+        
+        Args:
+            engineer_ids: 工程师ID列表
+            tenant_id: 租户ID
+        """
+        try:
+            # 获取缺失向量的工程师
+            engineers_missing = await self.db.get_engineers_with_embeddings(
+                engineer_ids, tenant_id
+            )
+            
+            if not engineers_missing:
+                logger.debug("所有工程师都已有向量，无需生成")
+                return
+            
+            logger.info(f"发现 {len(engineers_missing)} 个工程师缺失向量，开始生成...")
+            
+            # 分批处理
+            engineer_data_list = list(engineers_missing.values())
+            batches = self._batch_items(engineer_data_list)
+            
+            total_updated = 0
+            
+            for batch_idx, batch in enumerate(batches):
+                logger.info(f"处理工程师向量生成批次 {batch_idx + 1}/{len(batches)} ({len(batch)} 个工程师)")
+                
+                # 生成paraphrase文本
+                paraphrases = []
+                for engineer in batch:
+                    paraphrase = embedding_service.create_engineer_paraphrase(engineer)
+                    paraphrases.append(paraphrase)
+                
+                # 生成向量
+                embeddings = embedding_service.generate_embeddings(paraphrases)
+                
+                # 准备更新数据
+                update_data = []
+                for engineer, paraphrase, embedding in zip(batch, paraphrases, embeddings):
+                    update_data.append({
+                        "id": engineer["id"],
+                        "paraphrase": paraphrase,
+                        "embedding": embedding
+                    })
+                
+                # 批量更新数据库
+                updated_count = await self.db.update_engineer_embeddings(update_data)
+                total_updated += updated_count
+                
+                logger.info(f"批次 {batch_idx + 1} 完成，更新了 {updated_count} 个工程师向量")
+            
+            logger.info(f"✅ 工程师向量生成完成，总计更新: {total_updated}/{len(engineers_missing)}")
+            
+        except Exception as e:
+            logger.error(f"❌ 工程师向量生成失败: {str(e)}")
+            raise HTTPException(
+                status_code=500, 
+                detail=f"工程师向量生成失败: {str(e)}"
+            )
+
+    def _batch_items(self, items: List[Any], batch_size: int = 32) -> List[List[Any]]:
+        """
+        将列表分批处理
+        
+        Args:
+            items: 要分批的项目列表
+            batch_size: 批次大小，默认32
+            
+        Returns:
+            List[List[Any]]: 分批后的列表
+        """
+        batches = []
+        for i in range(0, len(items), batch_size):
+            batches.append(items[i:i + batch_size])
+        return batches
+
     # ========== 主要API方法 ==========
 
     async def match_project_to_engineers(
@@ -157,15 +305,23 @@ class AIMatchingService:
             )
 
             try:
-                # 获取项目信息
+                # 步骤1: 获取项目信息并确保有向量
                 project_info = await self.db.get_project_info(
                     request.project_id, request.tenant_id
                 )
                 if not project_info:
                     raise ValueError(f"项目不存在: {request.project_id}")
 
+                # 自动检查并生成项目向量
+                await self._ensure_project_embeddings([request.project_id], request.tenant_id)
+                
+                # 重新获取项目信息（现在应该有向量了）
+                project_info = await self.db.get_project_info(
+                    request.project_id, request.tenant_id
+                )
+                
                 if not project_info.get("ai_match_embedding"):
-                    raise ValueError(f"项目没有embedding数据: {request.project_id}")
+                    raise ValueError(f"项目向量生成失败: {request.project_id}")
 
                 # 获取候选工程师
                 candidate_engineers = await self.db.get_candidate_engineers(
@@ -178,8 +334,11 @@ class AIMatchingService:
                     logger.warning("没有找到候选工程师")
                     matches = []
                 else:
-                    # 获取候选工程师ID列表
+                    # 步骤4: 获取候选工程师ID列表并确保有向量
                     engineer_ids = [e["id"] for e in candidate_engineers]
+                    
+                    # 自动检查并生成工程师向量
+                    await self._ensure_engineer_embeddings(engineer_ids, request.tenant_id)
 
                     # 使用数据库直接计算相似度
                     similarity_results = (
@@ -276,15 +435,23 @@ class AIMatchingService:
             )
 
             try:
-                # 获取工程师信息
+                # 步骤1: 获取工程师信息并确保有向量
                 engineer_info = await self.db.get_engineer_info(
                     request.engineer_id, request.tenant_id
                 )
                 if not engineer_info:
                     raise ValueError(f"工程师不存在: {request.engineer_id}")
 
+                # 自动检查并生成工程师向量
+                await self._ensure_engineer_embeddings([request.engineer_id], request.tenant_id)
+                
+                # 重新获取工程师信息（现在应该有向量了）
+                engineer_info = await self.db.get_engineer_info(
+                    request.engineer_id, request.tenant_id
+                )
+                
                 if not engineer_info.get("ai_match_embedding"):
-                    raise ValueError(f"工程师没有embedding数据: {request.engineer_id}")
+                    raise ValueError(f"工程师向量生成失败: {request.engineer_id}")
 
                 # 获取候选项目
                 candidate_projects = await self.db.get_candidate_projects(
@@ -297,8 +464,11 @@ class AIMatchingService:
                     logger.warning("没有找到候选项目")
                     matches = []
                 else:
-                    # 获取候选项目ID列表
+                    # 步骤4: 获取候选项目ID列表并确保有向量
                     project_ids = [p["id"] for p in candidate_projects]
+                    
+                    # 自动检查并生成项目向量
+                    await self._ensure_project_embeddings(project_ids, request.tenant_id)
 
                     # 使用数据库直接计算相似度
                     similarity_results = (
@@ -401,7 +571,7 @@ class AIMatchingService:
                         project = await self.db.get_project_info(
                             project_id, request.tenant_id
                         )
-                        if project and project.get("ai_match_embedding"):
+                        if project:
                             candidate_projects.append(project)
                 else:
                     candidate_projects = await self.db.get_candidate_projects(
@@ -414,12 +584,39 @@ class AIMatchingService:
                         engineer = await self.db.get_engineer_info(
                             engineer_id, request.tenant_id
                         )
-                        if engineer and engineer.get("ai_match_embedding"):
+                        if engineer:
                             candidate_engineers.append(engineer)
                 else:
                     candidate_engineers = await self.db.get_candidate_engineers(
                         request.tenant_id, request.filters or {}
                     )
+
+                # 确保所有项目和工程师都有向量
+                if candidate_projects:
+                    project_ids = [p["id"] for p in candidate_projects]
+                    await self._ensure_project_embeddings(project_ids, request.tenant_id)
+                    
+                    # 重新获取项目数据（现在应该都有向量了）
+                    candidate_projects = []
+                    for project_id in project_ids:
+                        project = await self.db.get_project_info(
+                            project_id, request.tenant_id
+                        )
+                        if project and project.get("ai_match_embedding"):
+                            candidate_projects.append(project)
+
+                if candidate_engineers:
+                    engineer_ids = [e["id"] for e in candidate_engineers]
+                    await self._ensure_engineer_embeddings(engineer_ids, request.tenant_id)
+                    
+                    # 重新获取工程师数据（现在应该都有向量了）
+                    candidate_engineers = []
+                    for engineer_id in engineer_ids:
+                        engineer = await self.db.get_engineer_info(
+                            engineer_id, request.tenant_id
+                        )
+                        if engineer and engineer.get("ai_match_embedding"):
+                            candidate_engineers.append(engineer)
 
                 logger.info(
                     f"批量匹配：{len(candidate_projects)} 个项目 × {len(candidate_engineers)} 个工程师"

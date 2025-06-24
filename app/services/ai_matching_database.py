@@ -602,6 +602,184 @@ class AIMatchingDatabase:
                 "error": str(e),
             }
 
+    # ========== 向量生成相关查询 ==========
+
+    async def get_projects_with_embeddings(
+        self, project_ids: List[UUID], tenant_id: UUID
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        获取带向量的项目列表，返回缺失向量的项目信息
+        
+        Args:
+            project_ids: 项目ID列表
+            tenant_id: 租户ID
+            
+        Returns:
+            Dict[str, Dict[str, Any]]: {project_id: project_data} 缺失向量的项目数据
+        """
+        if not project_ids:
+            return {}
+        
+        try:
+            query = """
+            SELECT id, title, description, required_skills, preferred_skills,
+                   experience_required, japanese_level_required
+            FROM projects
+            WHERE id = ANY($1::uuid[]) 
+            AND tenant_id = $2
+            AND (ai_match_embedding IS NULL OR ai_match_paraphrase IS NULL)
+            AND is_active = true
+            """
+            
+            results = await fetch_all(query, project_ids, tenant_id)
+            
+            projects_missing_embeddings = {}
+            for row in results:
+                project_data = dict(row)
+                projects_missing_embeddings[str(project_data["id"])] = project_data
+            
+            logger.info(f"找到 {len(projects_missing_embeddings)} 个缺失向量的项目")
+            return projects_missing_embeddings
+            
+        except Exception as e:
+            logger.error(f"获取项目向量信息失败: {str(e)}")
+            return {}
+
+    async def get_engineers_with_embeddings(
+        self, engineer_ids: List[UUID], tenant_id: UUID
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        获取带向量的工程师列表，返回缺失向量的工程师信息
+        
+        Args:
+            engineer_ids: 工程师ID列表
+            tenant_id: 租户ID
+            
+        Returns:
+            Dict[str, Dict[str, Any]]: {engineer_id: engineer_data} 缺失向量的工程师数据
+        """
+        if not engineer_ids:
+            return {}
+        
+        try:
+            query = """
+            SELECT id, name, skills, experience, japanese_level, 
+                   current_status, work_scope, role
+            FROM engineers
+            WHERE id = ANY($1::uuid[]) 
+            AND tenant_id = $2
+            AND (ai_match_embedding IS NULL OR ai_match_paraphrase IS NULL)
+            AND is_active = true
+            """
+            
+            results = await fetch_all(query, engineer_ids, tenant_id)
+            
+            engineers_missing_embeddings = {}
+            for row in results:
+                engineer_data = dict(row)
+                engineers_missing_embeddings[str(engineer_data["id"])] = engineer_data
+            
+            logger.info(f"找到 {len(engineers_missing_embeddings)} 个缺失向量的工程师")
+            return engineers_missing_embeddings
+            
+        except Exception as e:
+            logger.error(f"获取工程师向量信息失败: {str(e)}")
+            return {}
+
+    async def update_project_embeddings(
+        self, project_embeddings: List[Dict[str, Any]]
+    ) -> int:
+        """
+        批量更新项目向量
+        
+        Args:
+            project_embeddings: 包含id, paraphrase, embedding的项目向量数据列表
+            
+        Returns:
+            int: 成功更新的数量
+        """
+        if not project_embeddings:
+            return 0
+        
+        updated_count = 0
+        
+        try:
+            async with get_db_connection() as conn:
+                for item in project_embeddings:
+                    try:
+                        await conn.execute(
+                            """
+                            UPDATE projects
+                            SET ai_match_paraphrase = $1, 
+                                ai_match_embedding = $2::vector,
+                                updated_at = NOW()
+                            WHERE id = $3
+                            """,
+                            item["paraphrase"],
+                            item["embedding"],
+                            item["id"]
+                        )
+                        updated_count += 1
+                        logger.debug(f"✅ 项目向量更新成功: {item['id']}")
+                        
+                    except Exception as e:
+                        logger.error(f"❌ 更新项目向量失败 {item['id']}: {str(e)}")
+                        continue
+            
+            logger.info(f"✅ 批量更新项目向量完成: {updated_count}/{len(project_embeddings)}")
+            return updated_count
+            
+        except Exception as e:
+            logger.error(f"❌ 批量更新项目向量失败: {str(e)}")
+            return updated_count
+
+    async def update_engineer_embeddings(
+        self, engineer_embeddings: List[Dict[str, Any]]
+    ) -> int:
+        """
+        批量更新工程师向量
+        
+        Args:
+            engineer_embeddings: 包含id, paraphrase, embedding的工程师向量数据列表
+            
+        Returns:
+            int: 成功更新的数量
+        """
+        if not engineer_embeddings:
+            return 0
+        
+        updated_count = 0
+        
+        try:
+            async with get_db_connection() as conn:
+                for item in engineer_embeddings:
+                    try:
+                        await conn.execute(
+                            """
+                            UPDATE engineers
+                            SET ai_match_paraphrase = $1, 
+                                ai_match_embedding = $2::vector,
+                                updated_at = NOW()
+                            WHERE id = $3
+                            """,
+                            item["paraphrase"],
+                            item["embedding"],
+                            item["id"]
+                        )
+                        updated_count += 1
+                        logger.debug(f"✅ 工程师向量更新成功: {item['id']}")
+                        
+                    except Exception as e:
+                        logger.error(f"❌ 更新工程师向量失败 {item['id']}: {str(e)}")
+                        continue
+            
+            logger.info(f"✅ 批量更新工程师向量完成: {updated_count}/{len(engineer_embeddings)}")
+            return updated_count
+            
+        except Exception as e:
+            logger.error(f"❌ 批量更新工程师向量失败: {str(e)}")
+            return updated_count
+
     # ========== 工具方法 ==========
 
     def format_project_info(self, project: Dict[str, Any]) -> Dict[str, Any]:
