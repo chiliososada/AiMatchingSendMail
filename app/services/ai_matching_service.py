@@ -81,6 +81,15 @@ class AIMatchingService:
                     engineer_id = result["id"]
                     project_title = target_info.get("title", "")
                     engineer_name = result.get("name", "")
+                    # 担当者信息从目标项目信息中获取
+                    project_manager_name = target_info.get("manager_name", "")
+                    project_manager_email = target_info.get("manager_email", "")
+                    project_created_by = str(target_info.get("created_by")) if target_info.get("created_by") else None
+                    # 技术者公司和担当者信息从匹配结果中获取
+                    engineer_company_name = result.get("company_name", "")  # 改为从company_name获取
+                    engineer_company_type = result.get("company_type", "")
+                    engineer_manager_name = result.get("manager_name", "")
+                    engineer_manager_email = result.get("manager_email", "")
                 else:
                     # 工程师匹配项目
                     project_id = result["id"]
@@ -89,6 +98,15 @@ class AIMatchingService:
                     project_info = await self.db.get_project_info(project_id, tenant_id)
                     project_title = project_info.get("title", "") if project_info else ""
                     engineer_name = target_info.get("name", "")
+                    # 担当者信息从获取的项目信息中提取
+                    project_manager_name = project_info.get("manager_name", "") if project_info else ""
+                    project_manager_email = project_info.get("manager_email", "") if project_info else ""
+                    project_created_by = str(project_info.get("created_by")) if project_info and project_info.get("created_by") else None
+                    # 技术者公司和担当者信息从目标技术者信息中获取
+                    engineer_company_name = target_info.get("company_name", "")  # 改为从company_name获取
+                    engineer_company_type = target_info.get("company_type", "")
+                    engineer_manager_name = target_info.get("manager_name", "")
+                    engineer_manager_email = target_info.get("manager_email", "")
 
                 # 简化版：直接使用相似度分数作为匹配分数
                 match_score = similarity_score
@@ -121,6 +139,15 @@ class AIMatchingService:
                     engineer_name=engineer_name,
                     status="未保存",
                     created_at=datetime.utcnow(),
+                    # 担当者信息
+                    project_manager_name=project_manager_name,
+                    project_manager_email=project_manager_email,
+                    project_created_by=project_created_by,
+                    # 技术者公司信息
+                    engineer_company_name=engineer_company_name,
+                    engineer_company_type=engineer_company_type,
+                    engineer_manager_name=engineer_manager_name,
+                    engineer_manager_email=engineer_manager_email,
                 )
 
                 matches.append(match)
@@ -400,7 +427,6 @@ class AIMatchingService:
 
                 return ProjectToEngineersResponse(
                     matching_history=MatchingHistoryResponse(**matching_history),
-                    matches=saved_matches,
                     total_matches=len(saved_matches),
                     high_quality_matches=high_quality_matches,
                     processing_time_seconds=processing_time,
@@ -409,7 +435,6 @@ class AIMatchingService:
                     recommendations=self._generate_simple_recommendations(
                         "project", len(saved_matches), high_quality_matches
                     ),
-                    warnings=[],
                 )
 
             except Exception as e:
@@ -537,7 +562,6 @@ class AIMatchingService:
 
                 return EngineerToProjectsResponse(
                     matching_history=MatchingHistoryResponse(**matching_history),
-                    matches=saved_matches,
                     total_matches=len(saved_matches),
                     high_quality_matches=high_quality_matches,
                     processing_time_seconds=processing_time,
@@ -546,7 +570,6 @@ class AIMatchingService:
                     recommendations=self._generate_simple_recommendations(
                         "engineer", len(saved_matches), high_quality_matches
                     ),
-                    warnings=[],
                 )
 
             except Exception as e:

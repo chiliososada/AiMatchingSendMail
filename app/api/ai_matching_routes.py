@@ -44,7 +44,16 @@ async def match_project_to_engineers(
     request: ProjectToEngineersMatchRequest, background_tasks: BackgroundTasks
 ):
     """
-    案件匹配简历API - 简化版（仅使用AI相似度）
+    案件匹配技术者API - 基于AI向量相似度匹配
+    
+    根据指定的项目，使用AI向量相似度算法找到最匹配的技术者。
+    返回匹配结果包含：
+    - 项目基本信息和担当者信息
+    - 匹配技术者列表，包含公司信息和担当者邮箱
+    - 匹配分数和详细原因
+    - 统计信息和建议
+    
+    匹配基于技能向量相似度计算，分数越高表示越匹配。
     """
     try:
         if not ai_matching_service:
@@ -91,7 +100,16 @@ async def match_engineer_to_projects(
     request: EngineerToProjectsMatchRequest, background_tasks: BackgroundTasks
 ):
     """
-    简历匹配案件API - 简化版（仅使用AI相似度）
+    技术者匹配案件API - 基于AI向量相似度匹配
+    
+    根据指定的技术者，使用AI向量相似度算法找到最匹配的项目。
+    返回匹配结果包含：
+    - 技术者基本信息，包含公司信息和担当者邮箱
+    - 匹配项目列表，包含担当者信息
+    - 匹配分数和详细原因
+    - 统计信息和建议
+    
+    匹配基于技能向量相似度计算，分数越高表示越匹配。
     """
     try:
         if not ai_matching_service:
@@ -535,7 +553,22 @@ async def ai_matching_health_check():
 
 @router.get("/usage/guide")
 def get_usage_guide():
-    """获取使用指南"""
+    """
+    获取AI匹配服务使用指南
+    
+    **内容包含：**
+    - API端点说明和示例
+    - 请求参数格式
+    - 响应结构说明
+    - 算法变更说明（简化版）
+    - 故障排查指南
+    - 从复杂权重版本的迁移说明
+    
+    **适用对象：**
+    - API集成开发者
+    - 系统管理员
+    - 业务用户
+    """
     return {
         "title": "AI匹配服务使用指南 - 简化版",
         "version": "v2.0-simplified",

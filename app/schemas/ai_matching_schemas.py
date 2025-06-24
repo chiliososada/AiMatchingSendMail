@@ -35,9 +35,9 @@ class AIMatchingRequest(BaseModel):
 
 
 class ProjectToEngineersMatchRequest(AIMatchingRequest):
-    """案件匹配简历请求"""
+    """案件匹配技术者请求 - 为指定项目找到合适的技术者"""
 
-    project_id: UUID
+    project_id: UUID = Field(description="要匹配的项目ID")
 
     # 案件特定的匹配权重
     weights: Optional[Dict[str, float]] = Field(
@@ -48,14 +48,28 @@ class ProjectToEngineersMatchRequest(AIMatchingRequest):
             "japanese_level_match": 0.15,
             "location_match": 0.1,
         },
-        description="匹配权重配置",
+        description="匹配权重配置 (当前版本使用AI向量相似度)",
     )
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "project_id": "c744bb81-c4f5-4550-bdc3-5dd217e81f68",
+                "tenant_id": "60714cf2-ec23-4cce-9029-fb4af9c799c5",
+                "max_matches": 10,
+                "min_score": 0.7,
+                "filters": {
+                    "japanese_level": ["N1", "N2"],
+                    "current_status": ["available"]
+                }
+            }
+        }
 
 
 class EngineerToProjectsMatchRequest(AIMatchingRequest):
-    """简历匹配案件请求"""
+    """技术者匹配案件请求 - 为指定技术者找到合适的项目"""
 
-    engineer_id: UUID
+    engineer_id: UUID = Field(description="要匹配的技术者ID")
 
     # 简历特定的匹配权重
     weights: Optional[Dict[str, float]] = Field(
@@ -65,8 +79,19 @@ class EngineerToProjectsMatchRequest(AIMatchingRequest):
             "budget_match": 0.2,
             "location_match": 0.15,
         },
-        description="匹配权重配置",
+        description="匹配权重配置 (当前版本使用AI向量相似度)",
     )
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "engineer_id": "307bdf0a-f7eb-4466-9f78-21b67db244b0",
+                "tenant_id": "60714cf2-ec23-4cce-9029-fb4af9c799c5",
+                "max_matches": 10,
+                "min_score": 0.7,
+                "filters": {}
+            }
+        }
 
 
 class BulkMatchingRequest(AIMatchingRequest):
@@ -121,10 +146,21 @@ class MatchResult(BaseModel):
     concerns: List[str] = Field(default_factory=list)
 
     # 基础信息
-    project_title: Optional[str] = None
-    engineer_name: Optional[str] = None
-    status: str = "未保存"
-    created_at: datetime
+    project_title: Optional[str] = Field(None, description="项目标题")
+    engineer_name: Optional[str] = Field(None, description="技术者姓名")
+    status: str = Field("未保存", description="匹配状态")
+    created_at: datetime = Field(description="匹配创建时间")
+    
+    # 项目担当者信息
+    project_manager_name: Optional[str] = Field(None, description="案件担当者姓名")
+    project_manager_email: Optional[str] = Field(None, description="案件担当者邮箱")
+    project_created_by: Optional[str] = Field(None, description="项目所属担当者ID")
+    
+    # 技术者公司信息
+    engineer_company_name: Optional[str] = Field(None, description="技术者所属公司/组织名称 (从engineers.company_name获取)")
+    engineer_company_type: Optional[str] = Field(None, description="技术者公司类型 (自社/他社等)")
+    engineer_manager_name: Optional[str] = Field(None, description="技术者担当者姓名 (从engineers.manager_name获取)")
+    engineer_manager_email: Optional[str] = Field(None, description="技术者担当者邮箱 (从engineers.manager_email获取)")
 
     class Config:
         from_attributes = True
@@ -182,18 +218,111 @@ class AIMatchingResponse(BaseModel):
     warnings: List[str] = Field(default_factory=list)
 
 
-class ProjectToEngineersResponse(AIMatchingResponse):
-    """案件匹配简历响应"""
+class ProjectToEngineersResponse(BaseModel):
+    """案件匹配技术者响应 - 根据项目匹配合适的技术者"""
 
-    project_info: Dict[str, Any]
-    matched_engineers: List[MatchResult]
+    matching_history: MatchingHistoryResponse = Field(description="匹配历史信息")
+    project_info: Dict[str, Any] = Field(description="项目基本信息，包含担当者信息")
+    matched_engineers: List[MatchResult] = Field(description="匹配到的技术者列表，包含公司和担当者信息")
+    
+    # 统计信息
+    total_matches: int = Field(description="总匹配数量")
+    high_quality_matches: int = Field(description="高质量匹配数量 (分数>=0.8)")
+    processing_time_seconds: float = Field(description="处理时间(秒)")
+    
+    # 建议
+    recommendations: List[str] = Field(default_factory=list, description="匹配建议和说明")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "matching_history": {
+                    "id": "496dc472-4d15-448c-bdf6-804e69082066",
+                    "tenant_id": "60714cf2-ec23-4cce-9029-fb4af9c799c5",
+                    "matching_type": "project_to_engineers",
+                    "execution_status": "completed"
+                },
+                "project_info": {
+                    "id": "c744bb81-c4f5-4550-bdc3-5dd217e81f68",
+                    "title": "案件タイトル *",
+                    "skills": ["Java", "Spring Boot", "SQL"],
+                    "manager": {
+                        "name": "案件担当者名",
+                        "email": "project-manager@company.com"
+                    },
+                    "created_by": "60714cf2-ec23-4cce-9029-fb4af9c799c5"
+                },
+                "matched_engineers": [
+                    {
+                        "project_title": "案件タイトル *",
+                        "engineer_name": "技术者姓名",
+                        "match_score": 0.95,
+                        "project_manager_name": "案件担当者名",
+                        "project_manager_email": "project-manager@company.com",
+                        "engineer_company_name": "技术者公司名",
+                        "engineer_company_type": "自社",
+                        "engineer_manager_name": "技术者担当者名",
+                        "engineer_manager_email": "engineer-manager@company.com"
+                    }
+                ],
+                "total_matches": 1,
+                "high_quality_matches": 1,
+                "processing_time_seconds": 0.8,
+                "recommendations": ["找到 1 个高质量匹配"]
+            }
+        }
 
 
-class EngineerToProjectsResponse(AIMatchingResponse):
-    """简历匹配案件响应"""
+class EngineerToProjectsResponse(BaseModel):
+    """技术者匹配案件响应 - 根据技术者匹配合适的项目"""
 
-    engineer_info: Dict[str, Any]
-    matched_projects: List[MatchResult]
+    matching_history: MatchingHistoryResponse = Field(description="匹配历史信息")
+    engineer_info: Dict[str, Any] = Field(description="技术者基本信息，包含公司信息")
+    matched_projects: List[MatchResult] = Field(description="匹配到的项目列表，包含担当者和技术者信息")
+    
+    # 统计信息
+    total_matches: int = Field(description="总匹配数量")
+    high_quality_matches: int = Field(description="高质量匹配数量 (分数>=0.8)")
+    processing_time_seconds: float = Field(description="处理时间(秒)")
+    
+    # 建议
+    recommendations: List[str] = Field(default_factory=list, description="匹配建议和说明")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "matching_history": {
+                    "id": "496dc472-4d15-448c-bdf6-804e69082066",
+                    "tenant_id": "60714cf2-ec23-4cce-9029-fb4af9c799c5",
+                    "matching_type": "engineer_to_projects",
+                    "execution_status": "completed"
+                },
+                "engineer_info": {
+                    "id": "307bdf0a-f7eb-4466-9f78-21b67db244b0",
+                    "name": "山本",
+                    "skills": ["Java", "Spring Boot", "SQL"],
+                    "company_name": "株式会社テック",
+                    "company_type": "自社",
+                    "manager_email": "tech@company.com"
+                },
+                "matched_projects": [
+                    {
+                        "project_title": "案件タイトル *",
+                        "engineer_name": "山本",
+                        "match_score": 1.0,
+                        "project_manager_name": "担当者名",
+                        "project_manager_email": "manager@company.com",
+                        "engineer_company_name": "株式会社テック",
+                        "engineer_manager_name": "株式会社テック",
+                        "engineer_manager_email": "tech@company.com"
+                    }
+                ],
+                "total_matches": 1,
+                "high_quality_matches": 1,
+                "processing_time_seconds": 0.5,
+                "recommendations": ["找到 1 个高质量匹配"]
+            }
+        }
 
 
 class BulkMatchingResponse(AIMatchingResponse):

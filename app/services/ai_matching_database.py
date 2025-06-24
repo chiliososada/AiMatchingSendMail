@@ -216,18 +216,17 @@ class AIMatchingDatabase:
         # 根据表类型选择正确的表名和字段名
         if table_type == "engineers":
             table_name = "engineers"
-            name_field = "name"
+            # 为技术者查询包含公司和担当者信息
+            fields = "id, name, company_name, manager_name, company_type, manager_email, 1 - (ai_match_embedding <=> $1) as similarity_score"
         else:  # projects
             table_name = "projects"
-            name_field = "title"  # 项目表使用title字段，不是name字段
+            # 为项目查询包含基本信息
+            fields = "id, title as name, 1 - (ai_match_embedding <=> $1) as similarity_score"
 
         # 直接使用pgvector的余弦相似度计算
         # 注意：pgvector的 <=> 返回的是距离，需要转换为相似度
         query = f"""
-        SELECT 
-            id,
-            {name_field} as name,
-            1 - (ai_match_embedding <=> $1) as similarity_score
+        SELECT {fields}
         FROM {table_name}
         WHERE id = ANY($2) 
             AND ai_match_embedding IS NOT NULL
@@ -812,6 +811,16 @@ class AIMatchingDatabase:
             "experience": project.get("experience", ""),
             "japanese_level": project.get("japanese_level", ""),
             "status": project.get("status", ""),
+            # 担当者信息 - 直接在顶层显示
+            "manager_name": project.get("manager_name", ""),
+            "manager_email": project.get("manager_email", ""),
+            "created_by": str(project.get("created_by")) if project.get("created_by") else None,
+            # 嵌套的manager对象（保持向后兼容）
+            "manager": {
+                "name": project.get("manager_name", ""),
+                "email": project.get("manager_email", ""),
+                "primary_manager_id": str(project.get("primary_manager_id")) if project.get("primary_manager_id") else None,
+            },
         }
 
     def format_engineer_info(self, engineer: Dict[str, Any]) -> Dict[str, Any]:
@@ -823,4 +832,10 @@ class AIMatchingDatabase:
             "experience": engineer.get("experience", ""),
             "japanese_level": engineer.get("japanese_level", ""),
             "current_status": engineer.get("current_status", ""),
+            # 公司信息
+            "company_name": engineer.get("company_name", ""),  # 从company_name获取
+            "company_type": engineer.get("company_type", ""),
+            # 担当者信息 - 直接在顶层显示
+            "manager_name": engineer.get("manager_name", ""),
+            "manager_email": engineer.get("manager_email", ""),
         }
