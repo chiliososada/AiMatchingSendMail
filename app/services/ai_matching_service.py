@@ -604,6 +604,15 @@ class AIMatchingService:
             )
 
             try:
+                # 构建过滤条件，包含新的过滤参数
+                filters = dict(request.filters or {})
+                if request.project_company_type is not None:
+                    filters["project_company_type"] = request.project_company_type
+                if request.engineer_company_type is not None:
+                    filters["engineer_company_type"] = request.engineer_company_type
+                if request.project_start_date is not None:
+                    filters["project_start_date"] = request.project_start_date
+
                 # 获取项目和工程师数据
                 if request.project_ids:
                     candidate_projects = []
@@ -615,7 +624,7 @@ class AIMatchingService:
                             candidate_projects.append(project)
                 else:
                     candidate_projects = await self.db.get_candidate_projects(
-                        request.tenant_id, request.filters or {}
+                        request.tenant_id, filters
                     )
 
                 if request.engineer_ids:
@@ -628,7 +637,7 @@ class AIMatchingService:
                             candidate_engineers.append(engineer)
                 else:
                     candidate_engineers = await self.db.get_candidate_engineers(
-                        request.tenant_id, request.filters or {}
+                        request.tenant_id, filters
                     )
 
                 # 确保所有项目和工程师都有向量
@@ -665,12 +674,10 @@ class AIMatchingService:
                 all_matches = []
                 top_matches_by_project = {}
 
-                # 限制处理数量以避免超时
-                max_projects = min(
-                    len(candidate_projects), 20
-                )  # 简化版：最多处理20个项目
+                # 处理所有候选项目
+                max_projects = len(candidate_projects)
 
-                for i, project in enumerate(candidate_projects[:max_projects]):
+                for i, project in enumerate(candidate_projects):
                     logger.info(
                         f"处理项目 {i+1}/{max_projects}: {project.get('title', '')}"
                     )
@@ -733,7 +740,7 @@ class AIMatchingService:
                     processing_time_seconds=processing_time,
                     ai_config={
                         "algorithm": "database_pgvector_similarity",
-                        "batch_size": request.batch_size,
+                        "batch_size": 32,  # 固定批次大小
                         "model_version": self.model_version,
                         "use_custom_weights": False,
                     },

@@ -98,16 +98,21 @@ class BulkMatchingRequest(AIMatchingRequest):
     """批量匹配请求"""
 
     project_ids: Optional[List[UUID]] = Field(
-        default=None, description="案件ID列表，为空则匹配所有活跃案件"
+        default=None, description="案件ID列表，为null则匹配所有状态为'募集中'的活跃案件"
     )
     engineer_ids: Optional[List[UUID]] = Field(
-        default=None, description="简历ID列表，为空则匹配所有可用简历"
+        default=None, description="工程师ID列表，为null则匹配所有可用工程师"
     )
 
-    # 批量匹配特定设置
-    batch_size: int = Field(default=50, ge=10, le=100, description="批处理大小")
-    generate_top_matches_only: bool = Field(
-        default=True, description="只生成高质量匹配"
+    # 过滤参数
+    project_company_type: Optional[str] = Field(
+        default=None, description="项目公司类型过滤（自社/他社），为null则不过滤"
+    )
+    engineer_company_type: Optional[str] = Field(
+        default=None, description="工程师公司类型过滤（自社/他社），为null则不过滤"
+    )
+    project_start_date: Optional[str] = Field(
+        default=None, description="项目开始时间过滤（YYYY-MM-DD格式），为null则不过滤"
     )
 
     @validator("project_ids", "engineer_ids")
@@ -116,6 +121,27 @@ class BulkMatchingRequest(AIMatchingRequest):
         if isinstance(v, list) and len(v) == 0:
             raise ValueError("ID列表不能为空，请传入None或有效的ID列表")
         return v
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "tenant_id": "123e4567-e89b-12d3-a456-426614174000",
+                "project_ids": [
+                    "c744bb81-c4f5-4550-bdc3-5dd217e81f68",
+                    "d855cc92-d5g6-5661-cee4-6ee328f92g79"
+                ],
+                "engineer_ids": None,
+                "project_company_type": "自社",
+                "engineer_company_type": "自社", 
+                "project_start_date": "2025-06-01",
+                "max_matches": 10,
+                "min_score": 0.7,
+                "filters": {
+                    "japanese_level": ["N1", "N2"],
+                    "skills": ["Python", "React"]
+                }
+            }
+        }
 
 
 class MatchResult(BaseModel):

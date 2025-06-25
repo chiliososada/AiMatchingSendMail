@@ -87,7 +87,7 @@ class AIMatchingDatabase:
         """获取项目信息"""
         query = """
         SELECT * FROM projects 
-        WHERE id = $1 AND tenant_id = $2 AND is_active = true
+        WHERE id = $1 AND tenant_id = $2 AND is_active = true AND status = '募集中'
         """
         return await fetch_one(query, project_id, tenant_id)
 
@@ -97,7 +97,7 @@ class AIMatchingDatabase:
         """获取候选项目"""
         base_query = """
         SELECT * FROM projects 
-        WHERE tenant_id = $1 AND is_active = true
+        WHERE tenant_id = $1 AND is_active = true AND status = '募集中'
         """
         params = [tenant_id]
         conditions = []
@@ -110,6 +110,23 @@ class AIMatchingDatabase:
             if "skills" in filters:
                 conditions.append(f"skills && ${len(params) + 1}")
                 params.append(filters["skills"])
+
+            # 新增：项目公司类型过滤
+            if "project_company_type" in filters and filters["project_company_type"] is not None:
+                conditions.append(f"company_type = ${len(params) + 1}")
+                params.append(filters["project_company_type"])
+
+            # 新增：项目开始时间过滤
+            if "project_start_date" in filters and filters["project_start_date"] is not None:
+                from datetime import datetime
+                try:
+                    # 将字符串日期转换为date对象
+                    date_obj = datetime.strptime(filters["project_start_date"], "%Y-%m-%d").date()
+                    conditions.append(f"start_date >= ${len(params) + 1}")
+                    params.append(date_obj)
+                except ValueError:
+                    logger.warning(f"无效的日期格式: {filters['project_start_date']}")
+                    # 跳过无效的日期过滤
 
         if conditions:
             base_query += " AND " + " AND ".join(conditions)
@@ -156,6 +173,11 @@ class AIMatchingDatabase:
                 conditions.append(f"skills && ${len(params) + 1}")
                 params.append(filters["skills"])
 
+            # 新增：工程师公司类型过滤
+            if "engineer_company_type" in filters and filters["engineer_company_type"] is not None:
+                conditions.append(f"company_type = ${len(params) + 1}")
+                params.append(filters["engineer_company_type"])
+
         if conditions:
             base_query += " AND " + " AND ".join(conditions)
 
@@ -182,7 +204,7 @@ class AIMatchingDatabase:
         """获取所有活跃的项目（用于生成embeddings）"""
         query = """
         SELECT * FROM projects 
-        WHERE tenant_id = $1 AND is_active = true
+        WHERE tenant_id = $1 AND is_active = true AND status = '募集中'
         ORDER BY created_at DESC LIMIT 1000
         """
         return await fetch_all(query, tenant_id)
@@ -385,11 +407,11 @@ class AIMatchingDatabase:
                         logger.error(f"找不到项目的tenant_id: {match.project_id}")
                         continue
 
-                    # 方法1: 先检查是否存在，然后决定INSERT或UPDATE
+                    # 方法1: 先检查是否存在活跃的匹配记录，然后决定INSERT或UPDATE
                     existing_match = await conn.fetchrow(
                         """
-                        SELECT id FROM project_engineer_matches 
-                        WHERE tenant_id = $1 AND project_id = $2 AND engineer_id = $3
+                        SELECT id, status FROM project_engineer_matches 
+                        WHERE tenant_id = $1 AND project_id = $2 AND engineer_id = $3 AND is_active = true
                         """,
                         tenant_id,
                         match.project_id,
@@ -398,6 +420,8 @@ class AIMatchingDatabase:
 
                     if existing_match:
                         # 更新现有记录
+                        # 保留的字段：status（匹配状态）、reviewed_at（审核时间）、reviewed_by（审核人）、comment（备注）、saved_at（保存时间）
+                        # 只更新匹配分数相关字段
                         await conn.execute(
                             """
                             UPDATE project_engineer_matches SET
@@ -413,9 +437,8 @@ class AIMatchingDatabase:
                                 missing_experiences = $10,
                                 match_reasons = $11,
                                 concerns = $12,
-                                status = $13,
                                 updated_at = NOW()
-                            WHERE tenant_id = $14 AND project_id = $15 AND engineer_id = $16
+                            WHERE tenant_id = $13 AND project_id = $14 AND engineer_id = $15 AND is_active = true
                             """,
                             match.match_score,
                             match.confidence_score,
@@ -429,7 +452,6 @@ class AIMatchingDatabase:
                             [],  # missing_experiences - 简化版不使用
                             ["基于embedding相似度匹配"],  # match_reasons
                             [],  # concerns - 简化版不使用
-                            match.status,
                             tenant_id,
                             match.project_id,
                             match.engineer_id,
@@ -649,6 +671,7 @@ class AIMatchingDatabase:
             AND tenant_id = $2
             AND (ai_match_embedding IS NULL OR ai_match_paraphrase IS NULL)
             AND is_active = true
+            AND status = '募集中'
             """
             
             results = await fetch_all(query, project_ids, tenant_id)
