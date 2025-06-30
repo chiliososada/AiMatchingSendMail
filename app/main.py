@@ -19,6 +19,7 @@ from .api.smtp_routes import router as smtp_router
 from .database import db_manager, health_check as db_health_check
 from .api.ai_matching_routes import router as ai_matching_router
 from .api.resume_parser_routes import router as resume_parser_router
+from .api.resume_upload_routes import router as resume_upload_router
 
 
 # 配置日志
@@ -272,6 +273,11 @@ app.include_router(
     resume_parser_router,
     prefix=f"{settings.API_V1_STR}/resume-parser",
     tags=["简历解析"],
+)
+app.include_router(
+    resume_upload_router,
+    prefix=f"{settings.API_V1_STR}/resume-upload",
+    tags=["简历上传"],
 )
 
 # 根路径和健康检查
