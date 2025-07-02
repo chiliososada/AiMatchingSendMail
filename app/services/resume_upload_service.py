@@ -410,6 +410,81 @@ class ResumeUploadService:
             logger.error(f"删除简历文件时出错: {str(e)}")
             return False
 
+    async def delete_resume_with_db_update(
+        self, 
+        storage_path: str, 
+        tenant_id, 
+        engineer_id
+    ) -> dict:
+        """
+        删除简历文件并更新数据库
+
+        Args:
+            storage_path: 存储路径
+            tenant_id: 租户ID
+            engineer_id: 工程师ID
+
+        Returns:
+            删除结果字典
+        """
+        try:
+            from ..database import get_db_connection
+            
+            # 1. 先删除存储文件
+            storage_client = get_supabase_storage()
+            file_deleted = await storage_client.delete_file(self.bucket_name, storage_path)
+            
+            if not file_deleted:
+                return {
+                    "success": False,
+                    "message": "文件删除失败",
+                    "error": "Storage file deletion failed",
+                    "database_updated": False
+                }
+            
+            # 2. 更新数据库中的engineers表
+            try:
+                async with get_db_connection() as conn:
+                    # 清空resume_url和resume_text字段
+                    await conn.execute(
+                        """
+                        UPDATE engineers 
+                        SET resume_url = NULL, resume_text = NULL
+                        WHERE id = $1 AND tenant_id = $2
+                        """,
+                        engineer_id,
+                        tenant_id
+                    )
+                    
+                    logger.info(f"数据库更新成功: engineer_id={engineer_id}, tenant_id={tenant_id}")
+                    database_updated = True
+                    
+            except Exception as db_error:
+                logger.error(f"数据库更新失败: {str(db_error)}")
+                # 文件已删除但数据库更新失败
+                return {
+                    "success": True,  # 文件删除成功
+                    "message": "文件删除成功，但数据库更新失败",
+                    "error": f"Database update failed: {str(db_error)}",
+                    "database_updated": False
+                }
+            
+            logger.info(f"简历完全删除成功: {storage_path}")
+            return {
+                "success": True,
+                "message": "简历文件和数据库记录删除成功",
+                "database_updated": database_updated
+            }
+
+        except Exception as e:
+            logger.error(f"删除简历时出错: {str(e)}")
+            return {
+                "success": False,
+                "message": "删除简历失败",
+                "error": str(e),
+                "database_updated": False
+            }
+
     async def file_exists(self, storage_path: str) -> bool:
         """
         检查文件是否存在

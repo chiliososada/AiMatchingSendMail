@@ -1,5 +1,5 @@
 # app/api/resume_upload_routes.py
-from fastapi import APIRouter, HTTPException, status, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, status, UploadFile, File, Form, Query
 from fastapi.responses import JSONResponse
 from typing import Optional
 from uuid import UUID
@@ -112,14 +112,21 @@ async def upload_resume(
 @router.delete("/delete/{tenant_id}")
 async def delete_resume(
     tenant_id: UUID,
-    storage_path: str = Form(..., description="削除するファイルのストレージパス")
+    storage_path: str = Query(..., description="削除するファイルのストレージパス"),
+    engineer_id: UUID = Query(..., description="エンジニアID（engineers表更新用）")
 ):
     """
     履歴書ファイルを削除
 
+    ## 機能
+    - Supabase Storageから履歴書ファイルを削除
+    - engineers表のresume_urlとresume_textフィールドをクリア
+    - データベースとストレージの整合性を保つ
+
     ## パラメータ
-    - **tenant_id**: テナントID
-    - **storage_path**: 削除するファイルのストレージパス
+    - **tenant_id**: テナントID（パスパラメータ）
+    - **storage_path**: 削除するファイルのストレージパス（クエリパラメータ）
+    - **engineer_id**: エンジニアID（engineers表更新用、クエリパラメータ）
 
     ## 戻り値
     - 成功時: 削除成功メッセージ
@@ -135,21 +142,26 @@ async def delete_resume(
                 detail="指定されたファイルへのアクセス権限がありません"
             )
 
-        result = await resume_upload_service.delete_resume(storage_path)
+        result = await resume_upload_service.delete_resume_with_db_update(
+            storage_path, tenant_id, engineer_id
+        )
 
-        if result:
+        if result["success"]:
             logger.info(f"履歴書削除成功: {storage_path}")
             return {
                 "success": True,
-                "message": "履歴書ファイルを削除しました",
-                "storage_path": storage_path
+                "message": "履歴書ファイルとデータベース記録を削除しました",
+                "storage_path": storage_path,
+                "engineer_id": str(engineer_id),
+                "database_updated": result["database_updated"]
             }
         else:
-            logger.warning(f"履歴書削除失敗: {storage_path}")
+            logger.warning(f"履歴書削除失敗: {storage_path} - {result.get('error', '')}")
             return {
                 "success": False,
-                "message": "ファイルの削除に失敗しました",
-                "storage_path": storage_path
+                "message": result.get("message", "ファイルの削除に失敗しました"),
+                "storage_path": storage_path,
+                "error": result.get("error", "")
             }
 
     except HTTPException:
