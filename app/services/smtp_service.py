@@ -280,14 +280,75 @@ class SMTPService:
                 attachment.set_payload(file_data)
                 encoders.encode_base64(attachment)
 
-            # 设置附件头信息
-            attachment.add_header(
-                "Content-Disposition", "attachment", filename=attachment_info.filename
-            )
+            # 设置附件头信息 - 正确处理非ASCII文件名
+            filename = attachment_info.filename
+            
+            # 处理非ASCII文件名 - 使用多种兼容方法
+            logger.info(f"处理附件文件名: {filename} (类型: {type(filename)})")
+            
+            # 确保filename是字符串
+            if not isinstance(filename, str):
+                filename = str(filename)
+            
+            # 检查是否为ASCII
+            is_ascii = True
+            try:
+                filename.encode('ascii')
+            except UnicodeEncodeError:
+                is_ascii = False
+                
+            logger.info(f"文件名是否为ASCII: {is_ascii}")
+            
+            if is_ascii:
+                # ASCII文件名，直接使用
+                attachment.add_header("Content-Disposition", "attachment", filename=filename)
+                logger.info(f"使用ASCII文件名: {filename}")
+            else:
+                # 非ASCII文件名，使用多种编码方法确保最大兼容性
+                import urllib.parse
+                import base64
+                from email.header import Header
+                
+                # 方法1: 使用RFC 2047 Base64编码 (对日文字符更友好)
+                try:
+                    # 对于日文字符，有些邮件客户端更喜欢这种方式
+                    encoded_b64 = base64.b64encode(filename.encode('utf-8')).decode('ascii')
+                    disposition_b64 = f'attachment; filename="=?UTF-8?B?{encoded_b64}?="'
+                    
+                    attachment["Content-Disposition"] = disposition_b64
+                    
+                    logger.info(f"使用Base64编码: {filename}")
+                    logger.info(f"Base64编码结果: {encoded_b64}")
+                    logger.info(f"Content-Disposition (Base64): {disposition_b64}")
+                    
+                except Exception as e:
+                    logger.warning(f"Base64编码失败，使用RFC 2231: {e}")
+                    
+                    # 方法2: RFC 2231编码 (现代标准)
+                    url_encoded = urllib.parse.quote(filename.encode('utf-8'))
+                    
+                    # 创建ASCII fallback (保留扩展名)
+                    name_part, ext_part = os.path.splitext(filename)
+                    ascii_fallback = f"document{ext_part}" if ext_part else "document"
+                    
+                    # 构建Content-Disposition头
+                    disposition_value = f'attachment; filename="{ascii_fallback}"; filename*=utf-8\'\'{url_encoded}'
+                    
+                    attachment["Content-Disposition"] = disposition_value
+                    
+                    logger.info(f"使用RFC 2231编码: {filename}")
+                    logger.info(f"Content-Disposition头: {disposition_value}")
+                    logger.info(f"URL编码文件名: {url_encoded}")
+                    logger.info(f"ASCII回退文件名: {ascii_fallback}")
+                
+                # 验证当前设置的头部
+                current_disposition = attachment.get("Content-Disposition", "未设置")
+                logger.info(f"最终Content-Disposition: {current_disposition}")
 
             # 添加文件大小信息（可选）
             attachment.add_header("Content-Length", str(attachment_info.file_size))
 
+            logger.info(f"附件创建成功: {attachment_info.filename}")
             logger.debug(f"附件创建成功: {attachment_info.filename}")
             return attachment
 

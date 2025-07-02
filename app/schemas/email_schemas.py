@@ -117,11 +117,21 @@ class EmailWithAttachmentsRequest(EmailSendRequest):
     attachment_ids: Optional[List[UUID]] = Field(
         default_factory=list, description="已上传的附件ID列表"
     )
+    attachment_filenames: Optional[List[str]] = Field(
+        default_factory=list, description="附件的原始文件名列表，与attachment_ids对应"
+    )
 
     @validator("attachment_ids")
     def validate_attachments(cls, v):
         if v and len(v) > 10:  # 限制附件数量
             raise ValueError("附件数量不能超过10个")
+        return v
+    
+    @validator("attachment_filenames")
+    def validate_attachment_filenames(cls, v, values):
+        attachment_ids = values.get("attachment_ids", [])
+        if v and attachment_ids and len(v) != len(attachment_ids):
+            raise ValueError("attachment_filenames的数量必须与attachment_ids的数量一致")
         return v
 
 

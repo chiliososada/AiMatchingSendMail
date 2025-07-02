@@ -371,7 +371,16 @@ async def send_email_with_attachments(
     email_request: EmailWithAttachmentsRequest,
     background_tasks: BackgroundTasks,
 ):
-    """发送带附件的邮件"""
+    """
+    发送带附件的邮件
+    
+    参数说明：
+    - attachment_ids: 已上传的附件ID列表
+    - attachment_filenames: 附件的原始文件名列表，与attachment_ids对应
+      - 如果提供此参数，邮件中的附件将显示为指定的文件名而非服务器存储的GUID文件名
+      - 数量必须与attachment_ids一致
+      - 可选参数，不提供则使用服务器文件名
+    """
     try:
         email_service = EmailService()
         result = await email_service.send_email_with_attachments(email_request)
@@ -727,6 +736,13 @@ async def send_email_individual_with_attachments(
     与 /send-with-attachments 接口的区别：
     - /send-with-attachments: 一封邮件发给多个收件人（收件人能看到彼此）
     - /send-individual-with-attachments: 循环发送单独邮件（收件人看不到其他人）
+    
+    参数说明：
+    - attachment_ids: 已上传的附件ID列表
+    - attachment_filenames: 附件的原始文件名列表，与attachment_ids对应
+      - 如果提供此参数，邮件中的附件将显示为指定的文件名而非服务器存储的GUID文件名
+      - 数量必须与attachment_ids一致
+      - 可选参数，不提供则使用服务器文件名
     """
     try:
         logger.info(f"开始单独发送带附件邮件给 {len(email_request.to_emails)} 个收件人")
