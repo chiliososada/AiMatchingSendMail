@@ -153,7 +153,7 @@ def _validate_resume_content_with_custom_keywords(
 
         if not is_valid_resume:
             result["warning"] = (
-                f"简历内容可能不完整，仅匹配到{match_count}个关键字（需要至少{min_matches}个）"
+                f"履歴書の内容が不完全である可能性があります。マッチしたキーワードは{match_count}個のみです（最低{min_matches}個が必要）"
             )
 
         return result
@@ -162,7 +162,7 @@ def _validate_resume_content_with_custom_keywords(
         logger.error(f"验证简历内容时出错: {str(e)}", exc_info=True)
         return {
             "content_valid": False,
-            "error": f"内容验证失败: {str(e)}",
+            "error": f"内容検証に失敗しました: {str(e)}",
             "match_count": 0,
             "total_keywords": len(keywords),
             "match_rate": 0.0,
@@ -250,7 +250,7 @@ def _analyze_file_structure(all_data: List[dict]) -> dict:
             "total_columns": 0,
             "has_data": False,
             "estimated_entries": 0,
-            "error": f"结构分析失败: {str(e)}",
+            "error": f"構造解析に失敗しました: {str(e)}",
         }
 
 
@@ -266,7 +266,7 @@ async def parse_resume(file: UploadFile = File(...), tenant_id: UUID = Form(...)
     if not file.filename.endswith((".xls", ".xlsx")):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="仅支持Excel文件格式 (.xls, .xlsx)",
+            detail="Excelファイル形式のみサポートされています (.xls, .xlsx)",
         )
 
     # 使用时间戳和UUID创建唯一的临时文件名
@@ -291,7 +291,7 @@ async def parse_resume(file: UploadFile = File(...), tenant_id: UUID = Form(...)
         logger.error(f"解析简历失败: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"解析失败: {str(e)}",
+            detail=f"解析に失敗しました: {str(e)}",
         )
     finally:
         # 清理临时文件
@@ -314,7 +314,7 @@ async def parse_resumes_batch(
         if not file.filename.endswith((".xls", ".xlsx")):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"文件 {file.filename} 不是支持的格式",
+                detail=f"ファイル {file.filename} はサポートされていない形式です",
             )
 
     temp_file_paths = []
@@ -344,7 +344,7 @@ async def parse_resumes_batch(
         logger.error(f"批量解析失败: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"批量解析失败: {str(e)}",
+            detail=f"一括解析に失敗しました: {str(e)}",
         )
     finally:
         # 清理临时文件
@@ -363,7 +363,7 @@ async def get_supported_formats():
         "required_keywords": REQUIRED_KEYWORDS,
         "min_keyword_matches": MIN_KEYWORD_MATCHES,
         "validation_info": {
-            "description": "文件内容必须包含简历相关的关键字",
+            "description": "ファイル内容は履歴書関連のキーワードを含む必要があります",
             "total_keywords": len(REQUIRED_KEYWORDS),
             "categories": [
                 "开发流程关键字（要件定義、基本設計等）",
@@ -399,7 +399,7 @@ async def validate_resume_format(
     if not file.filename.endswith((".xls", ".xlsx")):
         return {
             "valid": False,
-            "reason": "不支持的文件格式",
+            "reason": "サポートされていないファイル形式です",
             "supported_formats": [".xls", ".xlsx"],
             "file_info": {"filename": file.filename, "size": 0, "format_valid": False},
         }
@@ -432,7 +432,7 @@ async def validate_resume_format(
         if not data:
             return {
                 "valid": False,
-                "reason": "无法读取文件内容或文件为空",
+                "reason": "ファイル内容を読み取れないか、ファイルが空です",
                 "file_info": {
                     "filename": file.filename,
                     "size": file_size,
@@ -473,13 +473,13 @@ async def validate_resume_format(
             if not content_validation["content_valid"]:
                 validation_result["valid"] = False
                 validation_result["reason"] = (
-                    "简历内容验证失败："
-                    + content_validation.get("warning", "缺少必要的简历关键字")
+                    "履歴書内容の検証に失敗しました："
+                    + content_validation.get("warning", "必要な履歴書キーワードが不足しています")
                 )
         else:
             validation_result["content_validation"] = {
                 "content_valid": True,
-                "message": "已跳过内容验证（strict_validation=False）",
+                "message": "内容検証をスキップしました（strict_validation=False）",
             }
 
         # 8. 添加调试日志
@@ -489,7 +489,7 @@ async def validate_resume_format(
             f"总行数: {structure_analysis['total_rows']}, "
             f"预估条目: {structure_analysis['estimated_entries']}, "
             f"严格验证: {strict_validation}, "
-            f"最终结果: {'通过' if validation_result['valid'] else '失败'}"
+            f"最終結果: {'合格' if validation_result['valid'] else '不合格'}"
         )
 
         # 9. 返回详细的验证结果
@@ -499,7 +499,7 @@ async def validate_resume_format(
         logger.error(f"验证文件格式失败: {str(e)}", exc_info=True)
         return {
             "valid": False,
-            "reason": f"验证过程中发生错误: {str(e)}",
+            "reason": f"検証プロセス中にエラーが発生しました: {str(e)}",
             "file_info": {
                 "filename": file.filename,
                 "size": len(file_content) if "file_content" in locals() else 0,
@@ -563,10 +563,10 @@ async def get_validation_keywords():
             ],
         },
         "validation_rules": {
-            "description": "文件内容必须至少匹配3个关键字才能通过验证",
+            "description": "ファイル内容は検証に合格するために最低3つのキーワードとマッチする必要があります",
             "case_sensitive": False,
             "regex_enabled": True,
-            "fullwidth_halfwidth": "支持全角半角字符匹配",
+            "fullwidth_halfwidth": "全角・半角文字のマッチングをサポート",
         },
     }
 
@@ -588,7 +588,7 @@ async def validate_keywords_only(
     """
     if not file.filename.endswith((".xls", ".xlsx")):
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="仅支持Excel文件格式"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Excelファイル形式のみサポートされています"
         )
 
     # 使用自定义关键字或默认关键字
@@ -611,7 +611,7 @@ async def validate_keywords_only(
 
         if not data:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="无法读取文件内容"
+                status_code=status.HTTP_400_BAD_REQUEST, detail="ファイル内容を読み取れません"
             )
 
         # 使用自定义关键字进行验证（不修改全局变量）
@@ -634,7 +634,7 @@ async def validate_keywords_only(
         logger.error(f"关键字验证失败: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"关键字验证失败: {str(e)}",
+            detail=f"キーワード検証に失敗しました: {str(e)}",
         )
     finally:
         if temp_file_path.exists():

@@ -59,7 +59,7 @@ async def match_project_to_engineers(
         if not ai_matching_service:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="AI匹配服务未初始化",
+                detail="AIマッチングサービスが初期化されていません",
             )
 
         logger.info(f"收到案件匹配简历请求: project_id={request.project_id}")
@@ -76,7 +76,7 @@ async def match_project_to_engineers(
         if not project_exists:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"案件不存在或已删除: {request.project_id}",
+                detail=f"案件が存在しないか削除されています: {request.project_id}",
             )
 
         # 执行匹配
@@ -91,7 +91,7 @@ async def match_project_to_engineers(
         logger.error(f"案件匹配简历失败: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"匹配处理失败: {str(e)}",
+            detail=f"マッチング処理に失敗しました: {str(e)}",
         )
 
 
@@ -115,7 +115,7 @@ async def match_engineer_to_projects(
         if not ai_matching_service:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="AI匹配服务未初始化",
+                detail="AIマッチングサービスが初期化されていません",
             )
 
         logger.info(f"收到简历匹配案件请求: engineer_id={request.engineer_id}")
@@ -132,7 +132,7 @@ async def match_engineer_to_projects(
         if not engineer_exists:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"简历不存在或已删除: {request.engineer_id}",
+                detail=f"履歴書が存在しないか削除されています: {request.engineer_id}",
             )
 
         # 执行匹配
@@ -147,7 +147,7 @@ async def match_engineer_to_projects(
         logger.error(f"简历匹配案件失败: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"匹配处理失败: {str(e)}",
+            detail=f"マッチング処理に失敗しました: {str(e)}",
         )
 
 
@@ -162,7 +162,7 @@ async def bulk_matching(
         if not ai_matching_service:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="AI匹配服务未初始化",
+                detail="AIマッチングサービスが初期化されていません",
             )
 
         logger.info("收到批量匹配请求")
@@ -171,13 +171,13 @@ async def bulk_matching(
         if request.project_ids is not None and len(request.project_ids) == 0:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="project_ids不能为空列表，请传入None或有效的ID列表",
+                detail="project_idsは空のリストにできません。Noneまたは有効なIDリストを入力してください",
             )
 
         if request.engineer_ids is not None and len(request.engineer_ids) == 0:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="engineer_ids不能为空列表，请传入None或有效的ID列表",
+                detail="engineer_idsは空のリストにできません。Noneまたは有効なIDリストを入力してください",
             )
 
         # 执行批量匹配
@@ -192,7 +192,7 @@ async def bulk_matching(
         logger.error(f"批量匹配失败: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"批量匹配处理失败: {str(e)}",
+            detail=f"一括マッチング処理に失敗しました: {str(e)}",
         )
 
 
@@ -210,7 +210,7 @@ async def get_matching_history(
         if not ai_matching_service:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="AI匹配服务未初始化",
+                detail="AIマッチングサービスが初期化されていません",
             )
 
         histories = await ai_matching_service.get_matching_history(
@@ -229,7 +229,7 @@ async def get_matching_history(
         logger.error(f"获取匹配历史失败: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取历史记录失败: {str(e)}",
+            detail=f"履歴の取得に失敗しました: {str(e)}",
         )
 
 
@@ -240,7 +240,7 @@ async def get_matching_history_detail(tenant_id: UUID, history_id: UUID):
         if not ai_matching_service:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="AI匹配服务未初始化",
+                detail="AIマッチングサービスが初期化されていません",
             )
 
         histories = await ai_matching_service.get_matching_history(
@@ -250,7 +250,7 @@ async def get_matching_history_detail(tenant_id: UUID, history_id: UUID):
         if not histories:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"匹配历史不存在: {history_id}",
+                detail=f"マッチング履歴が存在しません: {history_id}",
             )
 
         return histories[0]
@@ -261,7 +261,7 @@ async def get_matching_history_detail(tenant_id: UUID, history_id: UUID):
         logger.error(f"获取匹配历史详情失败: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取历史详情失败: {str(e)}",
+            detail=f"履歴詳細の取得に失敗しました: {str(e)}",
         )
 
 
@@ -277,7 +277,7 @@ async def get_matches_by_history(
         if not ai_matching_service:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="AI匹配服务未初始化",
+                detail="AIマッチングサービスが初期化されていません",
             )
 
         matches = await ai_matching_service.get_matches_by_history(
@@ -296,7 +296,7 @@ async def get_matches_by_history(
         logger.error(f"获取匹配结果失败: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取匹配结果失败: {str(e)}",
+            detail=f"マッチング結果の取得に失敗しました: {str(e)}",
         )
 
 
@@ -316,7 +316,7 @@ async def update_match_status(
         if not ai_matching_service:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="AI匹配服务未初始化",
+                detail="AIマッチングサービスが初期化されていません",
             )
 
         success = await ai_matching_service.update_match_status(
@@ -329,12 +329,12 @@ async def update_match_status(
 
         if not success:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="匹配记录不存在或更新失败"
+                status_code=status.HTTP_404_NOT_FOUND, detail="マッチング記録が存在しないか更新に失敗しました"
             )
 
         return {
             "status": "success",
-            "message": "匹配状态更新成功",
+            "message": "マッチング状態の更新が成功しました",
             "match_id": str(match_id),
             "new_status": status,
         }
@@ -345,7 +345,7 @@ async def update_match_status(
         logger.error(f"更新匹配状态失败: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"状态更新失败: {str(e)}",
+            detail=f"状態更新に失敗しました: {str(e)}",
         )
 
 
@@ -357,7 +357,7 @@ async def get_ai_matching_system_info():
     """获取AI匹配系统信息"""
     try:
         return {
-            "service": "AI匹配服务",
+            "service": "AIマッチングサービス",
             "version": "2.0.0-simplified",
             "model": {
                 "name": "pgvector_database_similarity",
@@ -370,18 +370,18 @@ async def get_ai_matching_system_info():
                 "embedding_dimension": 768,
             },
             "features": [
-                "案件匹配简历（简化版）",
-                "简历匹配案件（简化版）",
-                "批量智能匹配（简化版）",
-                "纯AI相似度算法",
-                "数据库原生计算",
-                "匹配历史追踪",
-                "无自定义权重",
+                "案件マッチング履歴書（簡易版）",
+                "履歴書マッチング案件（簡易版）",
+                "一括スマートマッチング（簡易版）",
+                "純AI類似度アルゴリズム",
+                "データベースネイティブ計算",
+                "マッチング履歴追跡",
+                "カスタム重みなし",
                 "高性能pgvector",
             ],
             "algorithm": {
                 "type": "database_pgvector_similarity",
-                "description": "仅使用AI embedding向量相似度",
+                "description": "AI embeddingベクトル類似度のみを使用",
                 "custom_weights": False,
                 "business_rules": False,
             },
@@ -392,7 +392,7 @@ async def get_ai_matching_system_info():
     except Exception as e:
         logger.error(f"获取系统信息失败: {str(e)}")
         return {
-            "service": "AI匹配服务",
+            "service": "AIマッチングサービス",
             "status": "error",
             "error": str(e),
             "timestamp": datetime.utcnow().isoformat(),
@@ -420,7 +420,7 @@ async def ai_matching_health_check():
             else:
                 health_status["checks"]["ai_matching_service"] = {
                     "status": "error",
-                    "error": "服务未初始化",
+                    "error": "サービスが初期化されていません",
                 }
                 health_status["status"] = "unhealthy"
         except Exception as e:
@@ -482,7 +482,7 @@ async def ai_matching_health_check():
             else:
                 health_status["checks"]["pgvector"] = {
                     "status": "error",
-                    "error": "pgvector扩展未安装",
+                    "error": "pgvector拡張がインストールされていません",
                 }
                 health_status["status"] = "unhealthy"
         except Exception as e:
@@ -515,12 +515,12 @@ async def ai_matching_health_check():
                     else:
                         health_status["checks"]["similarity_calculation"] = {
                             "status": "error",
-                            "error": "相似度计算返回None",
+                            "error": "類似度計算がNoneを返しました",
                         }
                 else:
                     health_status["checks"]["similarity_calculation"] = {
                         "status": "warning",
-                        "message": "没有embedding数据可供测试",
+                        "message": "テスト用のembeddingデータがありません",
                     }
         except Exception as e:
             health_status["checks"]["similarity_calculation"] = {
@@ -570,30 +570,30 @@ def get_usage_guide():
     - 业务用户
     """
     return {
-        "title": "AI匹配服务使用指南 - 简化版",
+        "title": "AIマッチングサービス使用ガイド - 簡易版",
         "version": "v2.0-simplified",
-        "algorithm": "仅使用数据库pgvector相似度",
+        "algorithm": "データベースpgvector類似度のみを使用",
         "base_url": "/api/v1/ai-matching",
         "key_changes": {
             "removed_features": [
-                "自定义技能权重",
-                "经验年限权重",
-                "日语水平权重",
-                "地点预算权重",
-                "复杂业务规则",
+                "カスタムスキル重み",
+                "経験年数重み",
+                "日本語レベル重み",
+                "場所予算重み",
+                "複雑なビジネスルール",
             ],
             "current_algorithm": "match_score = 1 - (embedding <=> target_embedding)",
             "advantages": [
-                "性能更高（数据库原生计算）",
-                "代码更简洁",
-                "纯AI相似度",
-                "无业务偏见",
+                "高性能（データベースネイティブ計算）",
+                "コードがより簡潔",
+                "純AI類似度",
+                "ビジネスバイアスなし",
             ],
         },
         "endpoints": {
             "project_to_engineers": {
                 "url": "POST /project-to-engineers",
-                "description": "项目匹配工程师（仅AI相似度）",
+                "description": "プロジェクトマッチングエンジニア（AI類似度のみ）",
                 "example": {
                     "tenant_id": "33723dd6-cf28-4dab-975c-f883f5389d04",
                     "project_id": "12345678-1234-1234-1234-123456789abc",
@@ -605,7 +605,7 @@ def get_usage_guide():
             },
             "engineer_to_projects": {
                 "url": "POST /engineer-to-projects",
-                "description": "工程师匹配项目（仅AI相似度）",
+                "description": "エンジニアマッチングプロジェクト（AI類似度のみ）",
                 "example": {
                     "tenant_id": "33723dd6-cf28-4dab-975c-f883f5389d04",
                     "engineer_id": "12345678-1234-1234-1234-123456789abc",
@@ -617,27 +617,27 @@ def get_usage_guide():
             },
             "bulk_matching": {
                 "url": "POST /bulk-matching",
-                "description": "批量匹配（仅AI相似度）",
+                "description": "一括マッチング（AI類似度のみ）",
             },
         },
         "response_format": {
             "success": {
-                "total_matches": "匹配总数",
-                "matches": "匹配结果列表",
-                "match_score": "AI相似度分数 (0-1)",
-                "confidence_score": "等于match_score（简化版）",
+                "total_matches": "マッチング総数",
+                "matches": "マッチング結果リスト",
+                "match_score": "AI類似度スコア (0-1)",
+                "confidence_score": "match_scoreと同等（簡易版）",
             }
         },
         "migration_notes": [
-            "从复杂权重版本迁移：直接移除weights参数或传空字典",
-            "分数含义变化：现在完全基于AI embedding相似度",
-            "性能提升：使用数据库原生pgvector计算",
-            "结果更客观：无人工业务规则干预",
+            "複雑な重みバージョンからの移行：weightsパラメータを直接削除するか空の辞書を渡す",
+            "スコアの意味の変化：現在は完全にAI embedding類似度に基づく",
+            "性能向上：データベースネイティブpgvector計算を使用",
+            "結果がより客観的：人工的なビジネスルールの介入なし",
         ],
         "troubleshooting": [
-            "503错误：检查pgvector扩展是否安装",
-            "无匹配结果：降低min_score到0.1或更低",
-            "相似度异常：检查embedding数据是否存在",
-            "使用/ai-matching/system/health检查系统状态",
+            "503エラー：pgvector拡張がインストールされているかを確認",
+            "マッチング結果なし：min_scoreを0.1以下に下げる",
+            "類似度異常：embeddingデータが存在するかを確認",
+            "/ai-matching/system/healthを使用してシステム状態を確認",
         ],
     }

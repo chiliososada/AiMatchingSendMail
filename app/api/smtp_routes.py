@@ -89,7 +89,7 @@ async def get_default_smtp_config(tenant_id: UUID):
         if not config_info:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"租户 {tenant_id} 未找到可用的SMTP配置",
+                detail=f"テナント {tenant_id} の利用可能なSMTP設定が見つかりません",
             )
 
         logger.info(f"成功返回默认SMTP配置: {config_info['setting_name']}")
@@ -104,7 +104,7 @@ async def get_default_smtp_config(tenant_id: UUID):
         logger.error(f"详细错误信息: {traceback.format_exc()}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取SMTP配置失败: {str(e)}",
+            detail=f"SMTP設定の取得に失敗しました: {str(e)}",
         )
 
 
@@ -122,7 +122,7 @@ async def get_smtp_config_by_id(tenant_id: UUID, setting_id: UUID):
         if not config_info:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"未找到SMTP配置 (tenant: {tenant_id}, setting: {setting_id})",
+                detail=f"SMTP設定が見つかりません (tenant: {tenant_id}, setting: {setting_id})",
             )
 
         logger.info(f"成功返回SMTP配置: {config_info['setting_name']}")
@@ -137,7 +137,7 @@ async def get_smtp_config_by_id(tenant_id: UUID, setting_id: UUID):
         logger.error(f"详细错误信息: {traceback.format_exc()}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取SMTP配置失败: {str(e)}",
+            detail=f"SMTP設定の取得に失敗しました: {str(e)}",
         )
 
 
@@ -204,7 +204,7 @@ async def get_smtp_configs_list(
         logger.error(f"获取SMTP配置列表失败: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取SMTP配置列表失败: {str(e)}",
+            detail=f"SMTP設定リストの取得に失敗しました: {str(e)}",
         )
 
 
@@ -227,7 +227,7 @@ async def create_smtp_config(config_data: SMTPSettingsCreate):
         if not config_info:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="配置创建成功但获取配置信息失败",
+                detail="設定の作成は成功しましたが、設定情報の取得に失敗しました",
             )
 
         return SMTPConfigResponse(**config_info)
@@ -238,7 +238,7 @@ async def create_smtp_config(config_data: SMTPSettingsCreate):
         logger.error(f"创建SMTP配置失败: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"创建SMTP配置失败: {str(e)}",
+            detail=f"SMTP設定の作成に失敗しました: {str(e)}",
         )
 
 
@@ -269,7 +269,7 @@ async def test_smtp_connection(test_request: SMTPTestRequest):
         logger.error(f"详细错误信息: {traceback.format_exc()}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"SMTP连接测试失败: {str(e)}",
+            detail=f"SMTP接続テストに失敗しました: {str(e)}",
         )
 
 
@@ -288,12 +288,12 @@ def decrypt_password(request: PasswordDecryptRequest):
         return {
             "status": "success",
             "decrypted_password": decrypted,
-            "message": "密码解密成功",
+            "message": "パスワードの復号化が成功しました",
         }
     except Exception as e:
         logger.error(f"密码解密失败: {str(e)}")
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=f"密码解密失败: {str(e)}"
+            status_code=status.HTTP_400_BAD_REQUEST, detail=f"パスワードの復号化に失敗しました: {str(e)}"
         )
 
 
@@ -309,12 +309,12 @@ def encrypt_password(request: PasswordEncryptRequest):
         return {
             "status": "success",
             "encrypted_password": encrypted,
-            "message": "密码加密成功",
+            "message": "パスワードの暗号化が成功しました",
         }
     except Exception as e:
         logger.error(f"密码加密失败: {str(e)}")
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=f"密码加密失败: {str(e)}"
+            status_code=status.HTTP_400_BAD_REQUEST, detail=f"パスワードの暗号化に失敗しました: {str(e)}"
         )
 
 
@@ -332,7 +332,7 @@ def test_password_encryption():
         logger.error(f"密码加密测试失败: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"密码加密测试失败: {str(e)}",
+            detail=f"パスワード暗号化テストに失敗しました: {str(e)}",
         )
 
 
@@ -350,7 +350,7 @@ def get_system_info():
         key_info = smtp_password_manager.get_key_info()
         return {
             "status": "active",
-            "database": "asyncpg连接池",
+            "database": "asyncpgコネクションプール",
             "encryption_info": key_info,
             "supported_protocols": ["TLS", "SSL", "None"],
             "api_version": "v1",
@@ -386,7 +386,7 @@ async def health_check():
         return {
             "status": "healthy" if test_result and db_connected else "unhealthy",
             "database": "connected" if db_connected else "error",
-            "database_type": "asyncpg连接池",
+            "database_type": "asyncpgコネクションプール",
             "encryption_test": test_result,
             "compatible_with": "aimachingmail",
             "encryption_method": "Fernet with SHA256 key derivation",
@@ -415,35 +415,35 @@ def get_usage_guide():
     提供API使用说明和示例
     """
     return {
-        "title": "SMTP密码解密接入API使用指南",
+        "title": "SMTPパスワード復号化接続API使用ガイド",
         "version": "v1.0",
-        "database": "asyncpg连接池（高性能异步访问）",
-        "compatibility": "与aimachingmail项目完全兼容",
+        "database": "asyncpgコネクションプール（高性能非同期アクセス）",
+        "compatibility": "aimachingmailプロジェクトと完全互換",
         "base_url": "/api/v1/smtp",
         "encryption_info": {
-            "algorithm": "Fernet对称加密",
-            "key_derivation": "SHA256哈希（与aimachingmail一致）",
-            "format": "Base64编码的加密数据",
+            "algorithm": "Fernet対称暗号化",
+            "key_derivation": "SHA256ハッシュ（aimachingmailと一致）",
+            "format": "Base64エンコードされた暗号化データ",
         },
         "endpoints": {
             "get_default_config": {
                 "url": "GET /config/{tenant_id}/default",
-                "description": "获取租户默认SMTP配置（含解密密码）",
+                "description": "テナントのデフォルトSMTP設定を取得（復号化パスワード含む）",
                 "example": "GET /config/33723dd6-cf28-4dab-975c-f883f5389d04/default",
             },
             "get_config_by_id": {
                 "url": "GET /config/{tenant_id}/{setting_id}",
-                "description": "获取特定SMTP配置（含解密密码）",
+                "description": "特定SMTP設定を取得（復号化パスワード含む）",
                 "example": "GET /config/33723dd6-cf28-4dab-975c-f883f5389d04/12345678-1234-1234-1234-123456789abc",
             },
             "list_configs": {
                 "url": "GET /configs/{tenant_id}?include_password=true",
-                "description": "获取所有SMTP配置列表",
+                "description": "すべてのSMTP設定リストを取得",
                 "example": "GET /configs/33723dd6-cf28-4dab-975c-f883f5389d04?include_password=true",
             },
             "test_connection": {
                 "url": "POST /test",
-                "description": "测试SMTP连接",
+                "description": "SMTP接続をテスト",
                 "body": {
                     "tenant_id": "33723dd6-cf28-4dab-975c-f883f5389d04",
                     "setting_id": "12345678-1234-1234-1234-123456789abc",
@@ -453,11 +453,11 @@ def get_usage_guide():
         "authentication": {
             "type": "API Key",
             "header": "Authorization: Bearer your-api-key",
-            "note": "生产环境需要配置适当的认证机制",
+            "note": "本番環境では適切な認証メカニズムの設定が必要",
         },
         "response_format": {
-            "success": {"status": "success", "data": "响应数据"},
-            "error": {"detail": "错误描述", "status_code": "HTTP状态码"},
+            "success": {"status": "success", "data": "レスポンスデータ"},
+            "error": {"detail": "エラー説明", "status_code": "HTTPステータスコード"},
         },
         "important_notes": [
             "与aimachingmail项目使用相同的加密算法（SHA256派生密钥）",
