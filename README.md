@@ -1,4 +1,4 @@
-# 🚀 多租户邮件发送API系统
+# 🚀 AI智能邮件匹配发送系统 (AiMatchingSendMail)
 
 [![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-green.svg)](https://fastapi.tiangolo.com)
@@ -6,9 +6,16 @@
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://docker.com)
 
-一个功能强大的企业级多租户邮件发送API系统，基于FastAPI构建，支持高并发邮件发送、SMTP配置管理、附件处理、队列管理和实时统计分析。
+一个集成AI智能匹配功能的企业级多租户邮件发送API系统，专为招聘场景设计。基于FastAPI构建，不仅支持传统的邮件发送功能，还提供AI驱动的项目与工程师/简历智能匹配功能，大幅提升招聘效率。
 
 ## ✨ 核心特性
+
+### 🤖 AI智能匹配
+- **项目-工程师匹配**：基于sentence-transformers的语义匹配算法
+- **批量匹配**：支持大规模项目与工程师的批量匹配
+- **相似度计算**：使用pgvector进行高效的向量相似度搜索
+- **简历解析**：智能提取简历关键信息（技能、经验、日语等级等）
+- **匹配调试**：提供详细的匹配过程分析和调试工具
 
 ### 🎯 邮件发送服务
 - **高性能发送**：基于asyncpg连接池的异步邮件发送
@@ -24,19 +31,19 @@
 - **连接测试**：一键测试SMTP连接状态
 - **负载均衡**：智能选择最优SMTP服务器
 
-### 📎 附件处理
-- **多格式支持**：支持25+种文件格式
-- **安全验证**：多层文件安全检查和病毒扫描
-- **批量上传**：支持一次性上传多个附件
-- **存储管理**：自动清理过期文件和存储优化
-- **CDN加速**：支持附件CDN分发（可选）
+### 📄 简历处理
+- **多格式支持**：支持PDF、DOCX、TXT等格式简历
+- **智能提取器**：专业的信息提取器（姓名、技能、经验、国籍等）
+- **批量处理**：支持批量简历解析和信息提取
+- **数据标准化**：自动标准化提取的数据格式
+- **调试工具**：提供提取器调试和测试工具
 
 ### 📊 统计分析
-- **实时监控**：邮件发送成功率、失败率实时统计
+- **匹配分析**：AI匹配结果统计和分析
+- **邮件监控**：发送成功率、失败率实时统计
 - **性能分析**：发送耗时、队列状态分析
 - **数据可视化**：支持图表展示和数据导出
-- **告警通知**：异常情况自动告警
-- **历史追踪**：完整的邮件发送历史记录
+- **历史追踪**：完整的操作历史记录
 
 ## 🏗️ 技术架构
 
@@ -45,43 +52,46 @@ graph TB
     A[客户端应用] --> B[负载均衡器]
     B --> C[FastAPI服务集群]
     C --> D[asyncpg连接池]
-    D --> E[PostgreSQL数据库]
-    C --> F[Redis缓存]
+    D --> E[PostgreSQL + pgvector]
+    C --> F[Supabase存储]
     C --> G[文件存储]
     C --> H[SMTP服务商]
+    C --> I[AI匹配引擎]
     
     subgraph "核心服务"
-        C1[邮件发送服务]
-        C2[SMTP管理服务]
-        C3[附件管理服务]
-        C4[队列管理服务]
-        C5[统计分析服务]
+        C1[AI匹配服务]
+        C2[简历解析服务]
+        C3[邮件发送服务]
+        C4[SMTP管理服务]
+        C5[队列管理服务]
+        C6[统计分析服务]
     end
 ```
 
 ### 核心技术栈
 - **后端框架**：FastAPI 0.104+ (异步高性能)
-- **数据库**：PostgreSQL 15+ (asyncpg连接池)
-- **缓存**：Redis 6+ (可选)
+- **数据库**：PostgreSQL 15+ + pgvector (AI向量存储)
+- **AI/ML**：sentence-transformers, torch, numpy
+- **存储**：Supabase (云存储和数据库)
 - **邮件发送**：aiosmtplib (异步SMTP)
 - **加密算法**：Fernet (AES 128位加密)
-- **文件处理**：多格式支持和安全验证
+- **文件处理**：pandas, openpyxl (数据处理)
 - **容器化**：Docker + Docker Compose
 
 ## 🚀 快速开始
 
 ### 环境要求
 - Python 3.11+
-- PostgreSQL 15+
-- Redis 6+ (可选)
+- PostgreSQL 15+ (需要pgvector扩展)
+- Supabase账号 (数据库和存储)
 - Docker & Docker Compose (推荐)
 
 ### 1. Docker快速部署（推荐）
 
 ```bash
 # 克隆项目
-git clone https://github.com/yourusername/email-api-system.git
-cd email-api-system
+git clone https://github.com/yourusername/AiMatchingSendMail.git
+cd AiMatchingSendMail
 
 # 生成配置文件
 python generate_keys.py
@@ -89,8 +99,8 @@ python generate_keys.py
 # 启动服务
 docker-compose up -d
 
-# 查看服务状态
-docker-compose ps
+# 启动带管理工具的服务
+docker-compose --profile admin up -d
 
 # 查看日志
 docker-compose logs -f email-api
@@ -111,14 +121,11 @@ pip install -r requirements.txt
 cp .env.example .env
 # 编辑 .env 文件，设置数据库连接等配置
 
-# 启动数据库（使用Docker）
-docker run -d \
-  --name email_api_db \
-  -e POSTGRES_DB=email_api_db \
-  -e POSTGRES_USER=emailapi \
-  -e POSTGRES_PASSWORD=emailapi123 \
-  -p 5432:5432 \
-  postgres:15-alpine
+# 生成加密密钥
+python generate_keys.py
+
+# 初始化AI匹配数据库
+python init_ai_matching_db.py
 
 # 启动应用
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
@@ -140,11 +147,54 @@ curl http://localhost:8000/quick-test
 
 # SMTP解密服务测试
 curl http://localhost:8000/api/v1/smtp/health
+
+# AI匹配服务测试
+python test_ai_matching.py
 ```
 
 ## 📚 API文档
 
 ### 核心API端点
+
+#### 🤖 AI匹配管理
+```http
+# 单个项目匹配
+POST /api/v1/ai-matching/match-single
+{
+    "project_description": "项目描述",
+    "limit": 10
+}
+
+# 批量项目匹配
+POST /api/v1/ai-matching/match-batch
+{
+    "projects": [
+        {"id": "1", "description": "项目1描述"},
+        {"id": "2", "description": "项目2描述"}
+    ],
+    "limit": 5
+}
+
+# 更新工程师嵌入
+PUT /api/v1/ai-matching/engineer/{engineer_id}/embedding
+{
+    "description": "工程师技能描述"
+}
+```
+
+#### 📄 简历解析
+```http
+# 解析简历
+POST /api/v1/resume-parser/parse
+Content-Type: multipart/form-data
+
+# 批量解析简历
+POST /api/v1/resume-parser/parse-batch
+Content-Type: multipart/form-data
+
+# 获取解析结果
+GET /api/v1/resume-parser/result/{task_id}
+```
 
 #### 🔧 SMTP配置管理
 ```http
@@ -230,9 +280,16 @@ GET /api/v1/email/statistics/{tenant_id}?days=30
 # 数据库配置
 DATABASE_URL="postgresql://user:pass@host:5432/dbname"
 
+# Supabase配置
+SUPABASE_URL="https://your-project.supabase.co"
+SUPABASE_ANON_KEY="your-supabase-anon-key"
+SUPABASE_SERVICE_ROLE_KEY="your-supabase-service-role-key"
+
 # 安全配置
 SECRET_KEY="your-secret-key"
 ENCRYPTION_KEY="your-fernet-key"  # 用于SMTP密码加密
+API_KEY="your-api-key"
+REQUIRE_API_KEY=true
 
 # 文件上传限制
 MAX_FILE_SIZE=26214400  # 25MB
@@ -340,13 +397,13 @@ docker push 123456789.dkr.ecr.us-east-1.amazonaws.com/email-api:latest
 
 ### 文件安全
 - 多层文件类型验证
-- 病毒扫描集成
 - 文件大小和数量限制
 - 安全文件名处理
+- 简历文件自动清理
 
 ### 访问控制
 - 基于租户的数据隔离
-- API密钥认证
+- API密钥认证 (X-API-Key)
 - 速率限制保护
 - SQL注入防护
 
@@ -440,7 +497,7 @@ tail -f logs/app.log | grep -E "(ERROR|WARNING)"
 
 ### 项目结构
 ```
-email_api/
+AiMatchingSendMail/
 ├── app/
 │   ├── main.py              # FastAPI应用入口
 │   ├── config.py            # 配置管理
@@ -448,11 +505,14 @@ email_api/
 │   ├── models/              # 数据模型
 │   ├── schemas/             # 请求/响应模型
 │   ├── services/            # 业务逻辑
+│   │   └── extractors/      # 简历信息提取器
 │   ├── api/                 # API路由
 │   └── utils/               # 工具函数
 ├── tests/                   # 测试文件
-├── deployment/              # 部署配置
+├── examples/                # 集成示例
 ├── docker-compose.yml       # Docker编排
+├── init_ai_matching_db.py   # AI数据库初始化
+├── generate_embeddings.py   # 生成AI嵌入向量
 └── requirements.txt         # Python依赖
 ```
 
@@ -475,11 +535,18 @@ pytest --cov=app
 
 ### 添加新功能
 
-1. **数据模型**：在 `models/` 中定义SQLAlchemy模型
+1. **数据模型**：在 `models/` 中定义数据库模型
 2. **请求模型**：在 `schemas/` 中定义Pydantic模型
 3. **业务逻辑**：在 `services/` 中实现业务逻辑
 4. **API路由**：在 `api/` 中添加FastAPI路由
 5. **测试用例**：在 `tests/` 中添加测试用例
+
+### 添加简历提取器
+
+1. 创建新的提取器类继承 `base_extractor.py`
+2. 实现提取逻辑（正则/ML模式）
+3. 在 `resume_parser_service.py` 中添加到提取管道
+4. 使用 `debug_extractors.py` 进行测试
 
 ## 🔗 集成指南
 
@@ -493,7 +560,8 @@ import requests
 
 # 获取默认SMTP配置（含解密密码）
 response = requests.get(
-    f"http://your-email-api:8000/api/v1/smtp/config/{tenant_id}/default"
+    f"http://your-email-api:8000/api/v1/smtp/config/{tenant_id}/default",
+    headers={"X-API-Key": "your-api-key"}
 )
 smtp_config = response.json()
 
@@ -508,6 +576,24 @@ smtp = aiosmtplib.SMTP(
 ### React Native集成示例
 
 详见 `examples/react-native-example.js` 文件，包含完整的移动端集成示例。
+
+### AI匹配服务集成
+
+```python
+# 使用AI匹配服务
+import requests
+
+# 单个项目匹配
+response = requests.post(
+    "http://your-api:8000/api/v1/ai-matching/match-single",
+    headers={"X-API-Key": "your-api-key"},
+    json={
+        "project_description": "React + Node.js全栈开发",
+        "limit": 10
+    }
+)
+matches = response.json()
+```
 
 ## 📈 监控和告警
 
@@ -526,21 +612,21 @@ smtp = aiosmtplib.SMTP(
 ## 🛣️ 发展路线图
 
 ### v2.1（计划中）
+- [ ] 更多语言简历支持
+- [ ] AI匹配算法优化
 - [ ] 邮件模板系统
 - [ ] Webhook回调支持
-- [ ] 多语言邮件支持
-- [ ] 高级统计报表
 
 ### v2.2（计划中）
-- [ ] 人工智能反垃圾邮件
-- [ ] 邮件个性化推荐
-- [ ] 区块链邮件验证
-- [ ] 边缘节点部署
+- [ ] 智能简历评分系统
+- [ ] 自动化面试安排
+- [ ] AI对话式简历筛选
+- [ ] 多模态简历解析
 
 ### v3.0（远期规划）
-- [ ] 微服务架构重构
-- [ ] GraphQL API支持
-- [ ] 实时邮件协作
+- [ ] 大语言模型集成
+- [ ] 智能招聘助手
+- [ ] 全流程招聘自动化
 - [ ] 企业级SSO集成
 
 ## 📄 许可证
@@ -553,22 +639,25 @@ smtp = aiosmtplib.SMTP(
 
 - [FastAPI](https://fastapi.tiangolo.com/) - 现代高性能Web框架
 - [asyncpg](https://github.com/MagicStack/asyncpg) - 高性能PostgreSQL驱动
+- [sentence-transformers](https://www.sbert.net/) - 文本嵌入生成
+- [pgvector](https://github.com/pgvector/pgvector) - PostgreSQL向量扩展
+- [Supabase](https://supabase.com/) - 开源Firebase替代方案
 - [aiosmtplib](https://aiosmtplib.readthedocs.io/) - 异步SMTP客户端
 - [Cryptography](https://cryptography.io/) - 现代加密库
 
 ## 📞 支持与联系
 
-- 📧 邮箱：support@email-api.com
-- 📖 文档：https://docs.email-api.com
-- 🐛 问题报告：https://github.com/yourusername/email-api-system/issues
-- 💬 讨论区：https://github.com/yourusername/email-api-system/discussions
+- 📧 邮箱：support@aimatchingsendmail.com
+- 📖 文档：https://docs.aimatchingsendmail.com
+- 🐛 问题报告：https://github.com/yourusername/AiMatchingSendMail/issues
+- 💬 讨论区：https://github.com/yourusername/AiMatchingSendMail/discussions
 
 ---
 
 **⭐ 如果这个项目对您有帮助，请给我们一个 Star！**
 
 <div align="center">
-  <img src="https://img.shields.io/github/stars/yourusername/email-api-system?style=social" alt="GitHub stars">
-  <img src="https://img.shields.io/github/forks/yourusername/email-api-system?style=social" alt="GitHub forks">
-  <img src="https://img.shields.io/github/watchers/yourusername/email-api-system?style=social" alt="GitHub watchers">
+  <img src="https://img.shields.io/github/stars/yourusername/AiMatchingSendMail?style=social" alt="GitHub stars">
+  <img src="https://img.shields.io/github/forks/yourusername/AiMatchingSendMail?style=social" alt="GitHub forks">
+  <img src="https://img.shields.io/github/watchers/yourusername/AiMatchingSendMail?style=social" alt="GitHub watchers">
 </div>
