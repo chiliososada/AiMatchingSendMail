@@ -187,6 +187,11 @@ class MatchResult(BaseModel):
     engineer_company_type: Optional[str] = Field(None, description="技术者公司类型 (自社/他社等)")
     engineer_manager_name: Optional[str] = Field(None, description="技术者担当者姓名 (从engineers.manager_name获取)")
     engineer_manager_email: Optional[str] = Field(None, description="技术者担当者邮箱 (从engineers.manager_email获取)")
+    
+    # 技能详细分析
+    project_skills_cleaned: List[str] = Field(default_factory=list, description="项目清洗后的技能数组（全角→半角）")
+    engineer_skills_cleaned: List[str] = Field(default_factory=list, description="技术者清洗后的技能数组（全角→半角）")
+    overlapping_skills: List[str] = Field(default_factory=list, description="项目和技术者的重叠技能")
 
     class Config:
         from_attributes = True

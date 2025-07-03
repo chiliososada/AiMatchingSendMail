@@ -238,12 +238,12 @@ class AIMatchingDatabase:
         # 根据表类型选择正确的表名和字段名
         if table_type == "engineers":
             table_name = "engineers"
-            # 为技术者查询包含公司和担当者信息
-            fields = "id, name, company_name, manager_name, company_type, manager_email, 1 - (ai_match_embedding <=> $1) as similarity_score"
+            # 为技术者查询包含公司、担当者信息和技能
+            fields = "id, name, company_name, manager_name, company_type, manager_email, skills, 1 - (ai_match_embedding <=> $1) as similarity_score"
         else:  # projects
             table_name = "projects"
-            # 为项目查询包含基本信息
-            fields = "id, title as name, 1 - (ai_match_embedding <=> $1) as similarity_score"
+            # 为项目查询包含基本信息和技能
+            fields = "id, title as name, skills, 1 - (ai_match_embedding <=> $1) as similarity_score"
 
         # 直接使用pgvector的余弦相似度计算
         # 注意：pgvector的 <=> 返回的是距离，需要转换为相似度
