@@ -1,7 +1,7 @@
 # app/api/email_routes.py - asyncpg版本
 """
-邮件发送API路由 - 完整版
-包含邮件发送、附件管理、队列管理、统计等完整功能
+メール送信API ルート - 完全版
+メール送信、添付ファイル管理、キュー管理、統計などの完全な機能を含む
 """
 
 from fastapi import (
@@ -48,7 +48,7 @@ router = APIRouter()
 
 @router.post("/smtp-settings", response_model=SMTPSettingsResponse)
 async def create_smtp_settings(smtp_data: SMTPSettingsCreate):
-    """创建SMTP配置"""
+    """SMTP設定を作成"""
     try:
         email_service = EmailService()
         smtp_settings = await email_service.create_smtp_settings(smtp_data)
@@ -71,16 +71,16 @@ async def create_smtp_settings(smtp_data: SMTPSettingsCreate):
         )
 
     except Exception as e:
-        logger.error(f"创建SMTP设置失败: {str(e)}")
+        logger.error(f"SMTP設定の作成に失敗しました: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"创建SMTP设置失败: {str(e)}",
+            detail=f"SMTP設定の作成に失敗しました: {str(e)}",
         )
 
 
 @router.get("/smtp-settings/{tenant_id}", response_model=List[SMTPSettingsResponse])
 async def get_smtp_settings_list(tenant_id: UUID):
-    """获取租户的SMTP设置列表"""
+    """テナントのSMTP設定リストを取得"""
     try:
         email_service = EmailService()
         settings_list = await email_service.get_smtp_settings_list(tenant_id)
@@ -106,16 +106,16 @@ async def get_smtp_settings_list(tenant_id: UUID):
         ]
 
     except Exception as e:
-        logger.error(f"获取SMTP设置列表失败: {str(e)}")
+        logger.error(f"SMTP設定リストの取得に失敗しました: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取SMTP设置失败: {str(e)}",
+            detail=f"SMTP設定の取得に失敗しました: {str(e)}",
         )
 
 
 @router.post("/smtp-settings/test")
 async def test_smtp_connection(test_request: EmailTestRequest):
-    """测试SMTP连接"""
+    """SMTP接続をテスト"""
     try:
         email_service = EmailService()
         result = await email_service.test_smtp_connection(
@@ -124,14 +124,14 @@ async def test_smtp_connection(test_request: EmailTestRequest):
         return result
 
     except Exception as e:
-        logger.error(f"SMTP连接测试失败: {str(e)}")
+        logger.error(f"SMTP接続テストに失敗しました: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"SMTP连接测试失败: {str(e)}",
+            detail=f"SMTP接続テストに失敗しました: {str(e)}",
         )
 
 
-# ==================== 附件管理 ====================
+# ==================== 添付ファイル管理 ====================
 
 
 @router.post("/attachments/upload", response_model=AttachmentUploadResponse)
@@ -139,14 +139,14 @@ async def upload_attachment(
     tenant_id: UUID = Form(...),
     file: UploadFile = File(...),
 ):
-    """上传单个附件"""
+    """単一の添付ファイルをアップロード"""
     try:
         # 验证文件大小
         file_content = await file.read()
         if len(file_content) > settings.MAX_FILE_SIZE:
             raise HTTPException(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                detail=f"文件过大，最大允许{settings.MAX_FILE_SIZE/1024/1024:.1f}MB",
+                detail=f"ファイルが大きすぎます。最大{settings.MAX_FILE_SIZE/1024/1024:.1f}MBまで許可されています",
             )
 
         # 验证文件
@@ -157,7 +157,7 @@ async def upload_attachment(
         if not validation_result["valid"]:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"文件验证失败: {', '.join(validation_result['errors'])}",
+                detail=f"ファイル検証に失敗しました: {', '.join(validation_result['errors'])}",
             )
 
         # 保存附件
@@ -172,16 +172,16 @@ async def upload_attachment(
             content_type=attachment_info.content_type,
             file_size=attachment_info.file_size,
             status="uploaded",
-            message="附件上传成功",
+            message="添付ファイルのアップロードが成功しました",
         )
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"上传附件失败: {str(e)}")
+        logger.error(f"添付ファイルのアップロードに失敗しました: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"上传附件失败: {str(e)}",
+            detail=f"添付ファイルのアップロードに失敗しました: {str(e)}",
         )
 
 
@@ -192,12 +192,12 @@ async def upload_multiple_attachments(
     tenant_id: UUID = Form(...),
     files: List[UploadFile] = File(...),
 ):
-    """批量上传附件"""
+    """添付ファイルを一括アップロード"""
     try:
         if len(files) > settings.MAX_FILES_PER_REQUEST:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"文件数量超过限制，最大{settings.MAX_FILES_PER_REQUEST}个",
+                detail=f"ファイル数が制限を超えています。最大{settings.MAX_FILES_PER_REQUEST}個まで",
             )
 
         results = []
@@ -211,7 +211,7 @@ async def upload_multiple_attachments(
             if total_size > settings.MAX_TOTAL_REQUEST_SIZE:
                 raise HTTPException(
                     status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                    detail=f"总文件大小超过限制，最大{settings.MAX_TOTAL_REQUEST_SIZE/1024/1024:.1f}MB",
+                    detail=f"総ファイルサイズが制限を超えています。最大{settings.MAX_TOTAL_REQUEST_SIZE/1024/1024:.1f}MB",
                 )
 
             try:
@@ -228,7 +228,7 @@ async def upload_multiple_attachments(
                             content_type=file.content_type or "unknown",
                             file_size=len(file_content),
                             status="failed",
-                            message=f"验证失败: {', '.join(validation_result['errors'])}",
+                            message=f"検証に失敗しました: {', '.join(validation_result['errors'])}",
                         )
                     )
                     continue
@@ -246,12 +246,12 @@ async def upload_multiple_attachments(
                         content_type=attachment_info.content_type,
                         file_size=attachment_info.file_size,
                         status="uploaded",
-                        message="上传成功",
+                        message="アップロード成功",
                     )
                 )
 
             except Exception as e:
-                logger.error(f"上传文件 {file.filename} 失败: {str(e)}")
+                logger.error(f"ファイル {file.filename} のアップロードに失敗しました: {str(e)}")
                 results.append(
                     AttachmentUploadResponse(
                         attachment_id=UUID("00000000-0000-0000-0000-000000000000"),
@@ -259,7 +259,7 @@ async def upload_multiple_attachments(
                         content_type=file.content_type or "unknown",
                         file_size=len(file_content),
                         status="failed",
-                        message=f"上传失败: {str(e)}",
+                        message=f"アップロードに失敗しました: {str(e)}",
                     )
                 )
 
@@ -268,10 +268,10 @@ async def upload_multiple_attachments(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"批量上传附件失败: {str(e)}")
+        logger.error(f"添付ファイルの一括アップロードに失敗しました: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"批量上传失败: {str(e)}",
+            detail=f"一括アップロードに失敗しました: {str(e)}",
         )
 
 
@@ -279,33 +279,33 @@ async def upload_multiple_attachments(
 async def delete_attachment(
     tenant_id: UUID,
     attachment_id: UUID,
-    filename: str = Query(..., description="文件名"),
+    filename: str = Query(..., description="ファイル名"),
 ):
-    """删除附件"""
+    """添付ファイルを削除"""
     try:
         email_service = EmailService()
         success = email_service.delete_attachment(tenant_id, attachment_id, filename)
 
         if success:
-            return {"status": "success", "message": "附件删除成功"}
+            return {"status": "success", "message": "添付ファイルの削除が成功しました"}
         else:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="附件不存在或已被删除"
+                status_code=status.HTTP_404_NOT_FOUND, detail="添付ファイルが存在しないか、すでに削除されています"
             )
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"删除附件失败: {str(e)}")
+        logger.error(f"添付ファイルの削除に失敗しました: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"删除附件失败: {str(e)}",
+            detail=f"添付ファイルの削除に失敗しました: {str(e)}",
         )
 
 
 @router.get("/attachments/{tenant_id}", response_model=AttachmentListResponse)
 async def get_attachments_list(tenant_id: UUID):
-    """获取租户的附件列表"""
+    """テナントの添付ファイルリストを取得"""
     try:
         email_service = EmailService()
         storage_usage = email_service.attachment_manager.get_tenant_storage_usage(
@@ -317,7 +317,7 @@ async def get_attachments_list(tenant_id: UUID):
             attachments.append(
                 {
                     "filename": file_info["name"],
-                    "content_type": "application/octet-stream",  # 默认类型
+                    "content_type": "application/octet-stream",  # デフォルトタイプ
                     "file_size": file_info["size"],
                 }
             )
@@ -329,14 +329,14 @@ async def get_attachments_list(tenant_id: UUID):
         )
 
     except Exception as e:
-        logger.error(f"获取附件列表失败: {str(e)}")
+        logger.error(f"添付ファイルリストの取得に失敗しました: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取附件列表失败: {str(e)}",
+            detail=f"添付ファイルリストの取得に失敗しました: {str(e)}",
         )
 
 
-# ==================== 邮件发送 ====================
+# ==================== メール送信 ====================
 
 
 @router.post("/send", response_model=EmailSendResponse)
@@ -344,7 +344,7 @@ async def send_email(
     email_request: EmailSendRequest,
     background_tasks: BackgroundTasks,
 ):
-    """发送普通邮件"""
+    """通常のメールを送信"""
     try:
         email_service = EmailService()
         result = await email_service.send_email_immediately(email_request)
@@ -359,10 +359,10 @@ async def send_email(
         )
 
     except Exception as e:
-        logger.error(f"发送邮件失败: {str(e)}")
+        logger.error(f"メール送信に失敗しました: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"发送邮件失败: {str(e)}",
+            detail=f"メール送信に失敗しました: {str(e)}",
         )
 
 
@@ -372,14 +372,14 @@ async def send_email_with_attachments(
     background_tasks: BackgroundTasks,
 ):
     """
-    发送带附件的邮件
+    添付ファイル付きのメールを送信
     
-    参数说明：
-    - attachment_ids: 已上传的附件ID列表
-    - attachment_filenames: 附件的原始文件名列表，与attachment_ids对应
-      - 如果提供此参数，邮件中的附件将显示为指定的文件名而非服务器存储的GUID文件名
-      - 数量必须与attachment_ids一致
-      - 可选参数，不提供则使用服务器文件名
+    パラメータ説明：
+    - attachment_ids: アップロード済みの添付ファイルIDリスト
+    - attachment_filenames: 添付ファイルの元のファイル名リスト、attachment_idsと対応
+      - このパラメータを提供すると、メール内の添付ファイルはサーバーにGUIDで保存されたファイル名ではなく、指定されたファイル名で表示されます
+      - 数量はattachment_idsと一致する必要があります
+      - オプションパラメータ、提供されない場合はサーバーファイル名を使用
     """
     try:
         email_service = EmailService()
@@ -395,16 +395,16 @@ async def send_email_with_attachments(
         )
 
     except Exception as e:
-        logger.error(f"发送带附件邮件失败: {str(e)}")
+        logger.error(f"添付ファイル付きメールの送信に失敗しました: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"发送邮件失败: {str(e)}",
+            detail=f"メール送信に失敗しました: {str(e)}",
         )
 
 
 @router.post("/send-test")
 async def send_test_email(test_request: EmailTestRequest):
-    """发送测试邮件"""
+    """テストメールを送信"""
     try:
         email_service = EmailService()
         result = await email_service.send_test_email(
@@ -416,26 +416,26 @@ async def send_test_email(test_request: EmailTestRequest):
         return result
 
     except Exception as e:
-        logger.error(f"发送测试邮件失败: {str(e)}")
+        logger.error(f"テストメールの送信に失敗しました: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"发送测试邮件失败: {str(e)}",
+            detail=f"テストメールの送信に失敗しました: {str(e)}",
         )
 
 
-# ==================== 队列管理 ====================
+# ==================== キュー管理 ====================
 
 
 @router.get("/queue/{tenant_id}/{queue_id}", response_model=EmailStatusResponse)
 async def get_email_status(tenant_id: UUID, queue_id: UUID):
-    """获取邮件发送状态"""
+    """メール送信状態を取得"""
     try:
         email_service = EmailService()
         queue_item = await email_service.get_email_queue_status(tenant_id, queue_id)
 
         if not queue_item:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="邮件记录不存在"
+                status_code=status.HTTP_404_NOT_FOUND, detail="メールレコードが存在しません"
             )
 
         # 解析附件信息
@@ -465,20 +465,20 @@ async def get_email_status(tenant_id: UUID, queue_id: UUID):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"获取邮件状态失败: {str(e)}")
+        logger.error(f"メール状態の取得に失敗しました: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取邮件状态失败: {str(e)}",
+            detail=f"メール状態の取得に失敗しました: {str(e)}",
         )
 
 
 @router.get("/queue/{tenant_id}")
 async def get_email_queue_list(
     tenant_id: UUID,
-    limit: int = Query(50, ge=1, le=100, description="每页数量"),
-    offset: int = Query(0, ge=0, description="偏移量"),
+    limit: int = Query(50, ge=1, le=100, description="ページあたりの数量"),
+    offset: int = Query(0, ge=0, description="オフセット"),
 ):
-    """获取邮件队列列表"""
+    """メールキューリストを取得"""
     try:
         email_service = EmailService()
         queue_list = await email_service.get_email_queue_list(tenant_id, limit, offset)
@@ -522,10 +522,10 @@ async def get_email_queue_list(
         }
 
     except Exception as e:
-        logger.error(f"获取邮件队列列表失败: {str(e)}")
+        logger.error(f"メールキューリストの取得に失敗しました: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取邮件队列失败: {str(e)}",
+            detail=f"メールキューの取得に失敗しました: {str(e)}",
         )
 
 
@@ -535,9 +535,9 @@ async def get_email_queue_list(
 @router.get("/statistics/{tenant_id}", response_model=EmailStatistics)
 async def get_email_statistics(
     tenant_id: UUID,
-    days: int = Query(30, ge=1, le=365, description="统计天数"),
+    days: int = Query(30, ge=1, le=365, description="統計日数"),
 ):
-    """获取邮件发送统计"""
+    """メール送信統計を取得"""
     try:
         email_service = EmailService()
         stats = await email_service.get_email_statistics(tenant_id, days)
@@ -557,10 +557,10 @@ async def get_email_statistics(
         )
 
     except Exception as e:
-        logger.error(f"获取邮件统计失败: {str(e)}")
+        logger.error(f"メール統計の取得に失敗しました: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取统计数据失败: {str(e)}",
+            detail=f"統計データの取得に失敗しました: {str(e)}",
         )
 
 
@@ -570,31 +570,31 @@ async def get_email_statistics(
 @router.post("/maintenance/cleanup-attachments/{tenant_id}")
 async def cleanup_tenant_attachments(
     tenant_id: UUID,
-    days: int = Query(7, ge=1, le=365, description="清理多少天前的文件"),
+    days: int = Query(7, ge=1, le=365, description="何日前のファイルをクリーンアップするか"),
 ):
-    """清理租户的过期附件"""
+    """テナントの期限切れ添付ファイルをクリーンアップ"""
     try:
         email_service = EmailService()
         cleanup_count = email_service.cleanup_old_attachments(tenant_id, days)
 
         return {
             "status": "success",
-            "message": f"清理完成，删除了{cleanup_count}个过期附件",
+            "message": f"クリーンアップ完了、{cleanup_count}個の期限切れ添付ファイルを削除しました",
             "cleanup_count": cleanup_count,
             "days": days,
         }
 
     except Exception as e:
-        logger.error(f"清理附件失败: {str(e)}")
+        logger.error(f"添付ファイルのクリーンアップに失敗しました: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"清理附件失败: {str(e)}",
+            detail=f"添付ファイルのクリーンアップに失敗しました: {str(e)}",
         )
 
 
 @router.get("/maintenance/storage-usage/{tenant_id}")
 async def get_storage_usage(tenant_id: UUID):
-    """获取存储使用情况"""
+    """ストレージ使用状況を取得"""
     try:
         email_service = EmailService()
         usage = email_service.attachment_manager.get_tenant_storage_usage(tenant_id)
@@ -604,15 +604,15 @@ async def get_storage_usage(tenant_id: UUID):
             "total_size": usage["total_size"],
             "total_size_mb": round(usage["total_size"] / 1024 / 1024, 2),
             "file_count": usage["file_count"],
-            "files": usage["files"][:20],  # 只返回前20个文件信息
+            "files": usage["files"][:20],  # 最初の20個のファイル情報のみ返す
             "storage_path": usage.get("storage_path", ""),
         }
 
     except Exception as e:
-        logger.error(f"获取存储使用情况失败: {str(e)}")
+        logger.error(f"ストレージ使用状況の取得に失敗しました: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取存储信息失败: {str(e)}",
+            detail=f"ストレージ情報の取得に失敗しました: {str(e)}",
         )
 
 
@@ -621,20 +621,20 @@ async def get_storage_usage(tenant_id: UUID):
 
 @router.get("/system/info")
 async def get_system_info():
-    """获取系统信息"""
+    """システム情報を取得"""
     return {
-        "service": "邮件发送API",
+        "service": "メール送信API",
         "version": "2.0.0",
-        "database": "asyncpg连接池",
+        "database": "asyncpg接続プール",
         "supported_features": [
-            "SMTP配置管理",
-            "单发邮件",
-            "群发邮件",
-            "附件支持",
-            "邮件队列",
-            "状态跟踪",
-            "统计分析",
-            "高性能异步数据库访问",
+            "SMTP設定管理",
+            "単発メール",
+            "一括メール",
+            "添付ファイルサポート",
+            "メールキュー",
+            "状態追跡",
+            "統計分析",
+            "高性能非同期データベースアクセス",
         ],
         "limits": {
             "max_file_size_mb": settings.MAX_FILE_SIZE / 1024 / 1024,
@@ -653,14 +653,14 @@ async def get_system_info():
 
 @router.get("/system/health")
 async def health_check():
-    """健康检查"""
+    """ヘルスチェック"""
     try:
-        # 测试数据库连接
+        # データベース接続をテスト
         from ..database import check_database_connection
 
         db_connected = await check_database_connection()
 
-        # 检查上传目录
+        # アップロードディレクトリをチェック
         upload_dir = Path(settings.ATTACHMENT_DIR)
         upload_accessible = upload_dir.exists() and os.access(upload_dir, os.W_OK)
 
@@ -668,13 +668,13 @@ async def health_check():
             "status": "healthy",
             "timestamp": datetime.utcnow().isoformat(),
             "database": "connected" if db_connected else "error",
-            "database_type": "asyncpg连接池",
+            "database_type": "asyncpg接続プール",
             "storage": "accessible" if upload_accessible else "error",
             "upload_directory": str(upload_dir),
         }
 
     except Exception as e:
-        logger.error(f"健康检查失败: {str(e)}")
+        logger.error(f"ヘルスチェックに失敗しました: {str(e)}")
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             content={
@@ -685,7 +685,7 @@ async def health_check():
         )
 
 
-# 在 app/api/email_routes.py 中添加的新路由
+# app/api/email_routes.py に追加された新しいルート
 
 
 @router.post("/send-individual", response_model=EmailSendResponse)
@@ -694,16 +694,16 @@ async def send_email_individual(
     background_tasks: BackgroundTasks,
 ):
     """
-    单独发送邮件（每个收件人收到独立的邮件）
+    個別メール送信（各受信者が独立したメールを受信）
 
-    与 /send 接口的区别：
-    - /send: 一封邮件发给多个收件人（收件人能看到彼此）
-    - /send-individual: 循环发送单独邮件（收件人看不到其他人）
+    /send インターフェースとの違い：
+    - /send: 複数の受信者に1通のメールを送信（受信者同士が見える）
+    - /send-individual: 個別メールをループ送信（受信者が他の人を見えない）
 
-    请求格式与 /send 完全相同，但行为不同
+    リクエスト形式は /send と完全に同じですが、動作が異なります
     """
     try:
-        logger.info(f"开始单独发送邮件给 {len(email_request.to_emails)} 个收件人")
+        logger.info(f"{len(email_request.to_emails)}人の受信者に個別メール送信を開始")
 
         email_service = EmailService()
         result = await email_service.send_email_individual(email_request)
@@ -718,10 +718,10 @@ async def send_email_individual(
         )
 
     except Exception as e:
-        logger.error(f"单独发送邮件失败: {str(e)}")
+        logger.error(f"個別メール送信に失敗しました: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"单独发送邮件失败: {str(e)}",
+            detail=f"個別メール送信に失敗しました: {str(e)}",
         )
 
 
@@ -731,21 +731,21 @@ async def send_email_individual_with_attachments(
     background_tasks: BackgroundTasks,
 ):
     """
-    单独发送带附件的邮件（每个收件人收到独立的邮件）
+    添付ファイル付き個別メール送信（各受信者が独立したメールを受信）
 
-    与 /send-with-attachments 接口的区别：
-    - /send-with-attachments: 一封邮件发给多个收件人（收件人能看到彼此）
-    - /send-individual-with-attachments: 循环发送单独邮件（收件人看不到其他人）
+    /send-with-attachments インターフェースとの違い：
+    - /send-with-attachments: 複数の受信者に1通のメールを送信（受信者同士が見える）
+    - /send-individual-with-attachments: 個別メールをループ送信（受信者が他の人を見えない）
     
-    参数说明：
-    - attachment_ids: 已上传的附件ID列表
-    - attachment_filenames: 附件的原始文件名列表，与attachment_ids对应
-      - 如果提供此参数，邮件中的附件将显示为指定的文件名而非服务器存储的GUID文件名
-      - 数量必须与attachment_ids一致
-      - 可选参数，不提供则使用服务器文件名
+    パラメータ説明：
+    - attachment_ids: アップロード済みの添付ファイルIDリスト
+    - attachment_filenames: 添付ファイルの元のファイル名リスト、attachment_idsと対応
+      - このパラメータを提供すると、メール内の添付ファイルはサーバーにGUIDで保存されたファイル名ではなく、指定されたファイル名で表示されます
+      - 数量はattachment_idsと一致する必要があります
+      - オプションパラメータ、提供されない場合はサーバーファイル名を使用
     """
     try:
-        logger.info(f"开始单独发送带附件邮件给 {len(email_request.to_emails)} 个收件人")
+        logger.info(f"{len(email_request.to_emails)}人の受信者に添付ファイル付き個別メール送信を開始")
 
         email_service = EmailService()
         result = await email_service.send_email_individual_with_attachments(
@@ -762,8 +762,8 @@ async def send_email_individual_with_attachments(
         )
 
     except Exception as e:
-        logger.error(f"单独发送带附件邮件失败: {str(e)}")
+        logger.error(f"添付ファイル付き個別メール送信に失敗しました: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"单独发送邮件失败: {str(e)}",
+            detail=f"個別メール送信に失敗しました: {str(e)}",
         )
