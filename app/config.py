@@ -1,13 +1,52 @@
 # app/config.py - asyncpg版本
-from pydantic_settings import BaseSettings
-from pydantic import field_validator
-from typing import List, Optional, Any, Dict, Union
 import os
 import re
+import sys
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Union
+
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def get_upload():
+
+    if getattr(sys, "frozen", False):
+        # Running in a PyInstaller bundle
+        if len(sys.argv) > 3:
+            return Path(sys.argv[3]) / "uploads"
+        else:
+            return Path("uploads")
+    else:
+        return Path("uploads")
+
+
+def get_runtime_path(relative_path):
+    if getattr(sys, "frozen", False):
+        # Running in a PyInstaller bundle
+        base_path = sys._MEIPASS
+    else:
+        # Running in normal Python
+        base_path = os.getcwd()
+    return os.path.join(base_path, relative_path)
 
 
 class Settings(BaseSettings):
+
+    model_config = SettingsConfigDict(
+        env_file=get_runtime_path(".env"),
+        env_file_encoding="utf-8",
+        extra="allow",
+        case_sensitive=True,
+        env_prefix="",
+    )
+    # class Config:
+    #    env_file = ".env"
+    #    env_file_encoding = "utf-8"
+    #    case_sensitive = True
+    #    extra = "allow"
+    #    env_prefix = ""
+
     # 应用基本配置
     PROJECT_NAME: str = "Email API"
     VERSION: str = "2.0.0"
@@ -44,7 +83,7 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "your-secret-key-change-in-production"
     ENCRYPTION_KEY: Optional[str] = None
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8
-    
+
     # API Key 认证配置
     API_KEY: Optional[str] = None
     REQUIRE_API_KEY: bool = False
@@ -291,6 +330,11 @@ class Settings(BaseSettings):
         return Path(self.UPLOAD_DIR)
 
     @property
+    def template_path(self) -> Path:
+        """获取模版目录路径"""
+        return Path(self.TEMPLATE_DIR)
+
+    @property
     def attachment_path(self) -> Path:
         """获取附件目录路径"""
         return Path(self.ATTACHMENT_DIR)
@@ -406,10 +450,12 @@ class Settings(BaseSettings):
             self.upload_path,
             self.attachment_path,
             self.temp_path,
-            Path(self.TEMPLATE_DIR),
+            self.template_path,
         ]
 
         for directory in directories:
+
+            print(f"create dir: {directory}")
             directory.mkdir(parents=True, exist_ok=True)
 
     def validate_settings(self) -> List[str]:
@@ -494,17 +540,15 @@ class Settings(BaseSettings):
             },
         }
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = True
-        extra = "allow"
-        env_prefix = ""
-
 
 # 创建全局设置实例
 try:
-    settings = Settings()
+    settings = Settings(
+        UPLOAD_DIR=str(get_upload()),
+        ATTACHMENT_DIR=str(get_upload() / "attachments"),
+        TEMP_DIR=str(get_upload() / "temp"),
+        TEMPLATE_DIR=str(get_upload() / "template"),
+    )
     print("✅ 配置加载成功")
     print(f"🗄️  数据库类型: asyncpg连接池")
     print(f"🔗 数据库URL: {settings.get_database_url(hide_password=True)}")

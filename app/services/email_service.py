@@ -1,39 +1,37 @@
 # app/services/email_service.py - asyncpg版本
 import asyncio
-from uuid import UUID, uuid4
-from typing import List, Optional, Dict, Any, Tuple, Union
-from datetime import datetime, timedelta
+import json
+import logging
+import mimetypes
 import os
 import shutil
+from datetime import datetime, timedelta
 from pathlib import Path
-import mimetypes
-import logging
-import json
-
+from typing import Any, Dict, List, Optional, Tuple, Union
+from uuid import UUID, uuid4
 
 from ..database import (
+    execute_query,
+    fetch_all,
+    fetch_one,
+    fetch_val,
     get_db_connection,
     get_db_transaction,
-    execute_query,
-    fetch_one,
-    fetch_all,
-    fetch_val,
 )
 from ..schemas.email_schemas import (
-    EmailSendRequest,
-    SMTPSettingsCreate,
     AttachmentInfo,
-    EmailWithAttachmentsRequest,
-    BulkEmailRequest,
     AttachmentUploadResponse,
+    BulkEmailRequest,
+    EmailSendRequest,
+    EmailWithAttachmentsRequest,
+    SMTPSettingsCreate,
 )
-from ..utils.security import encrypt_password, SMTPPasswordManager
+from ..utils.security import SMTPPasswordManager, encrypt_password
 
 # 创建全局SMTP密码管理器实例
 smtp_password_manager = SMTPPasswordManager()
-from .smtp_service import SMTPService
 from ..config import settings
-
+from .smtp_service import SMTPService
 
 logger = logging.getLogger(__name__)
 
@@ -41,9 +39,9 @@ logger = logging.getLogger(__name__)
 class AttachmentManager:
     """增强版附件管理器"""
 
-    def __init__(self, base_path: str = "uploads/attachments"):
-        self.base_path = Path(base_path)
-        self.base_path.mkdir(parents=True, exist_ok=True)
+    def __init__(self):
+        self.base_path = settings.attachment_path
+        # self.base_path.mkdir(parents=True, exist_ok=True)
 
         # 临时文件清理阈值（24小时）
         self.cleanup_threshold = timedelta(hours=24)
@@ -124,11 +122,11 @@ class AttachmentManager:
     ) -> Optional[AttachmentInfo]:
         """
         根据attachment_id获取附件信息
-        
+
         Args:
             tenant_id: 租户ID
             attachment_id: 附件ID
-            
+
         Returns:
             Optional[AttachmentInfo]: 附件信息
         """
@@ -136,7 +134,7 @@ class AttachmentManager:
         tenant_dir = os.path.join(self.base_path, str(tenant_id))
         if not os.path.exists(tenant_dir):
             return None
-            
+
         # 查找以attachment_id为前缀的文件
         for filename in os.listdir(tenant_dir):
             if filename.startswith(str(attachment_id)):
@@ -145,12 +143,12 @@ class AttachmentManager:
                     try:
                         # 获取文件统计信息
                         stat = os.stat(file_path)
-                        
+
                         # 检测MIME类型
                         content_type, _ = mimetypes.guess_type(filename)
                         if not content_type:
                             content_type = "application/octet-stream"
-                            
+
                         return AttachmentInfo(
                             filename=filename,
                             content_type=content_type,
@@ -576,7 +574,7 @@ class EmailService:
             if email_request.attachment_ids:
                 attachment_manager = AttachmentManager()
                 attachment_filenames = email_request.attachment_filenames or []
-                
+
                 for i, attachment_id in enumerate(email_request.attachment_ids):
                     try:
                         # 获取附件信息
@@ -585,7 +583,10 @@ class EmailService:
                         )
                         if attachment_info:
                             # 如果提供了原始文件名，则使用传递的文件名
-                            if i < len(attachment_filenames) and attachment_filenames[i]:
+                            if (
+                                i < len(attachment_filenames)
+                                and attachment_filenames[i]
+                            ):
                                 original_filename = attachment_filenames[i]
                                 # 创建新的AttachmentInfo使用原始文件名
                                 attachment_info = AttachmentInfo(
@@ -594,10 +595,12 @@ class EmailService:
                                     file_size=attachment_info.file_size,
                                     file_path=attachment_info.file_path,
                                 )
-                            
+
                             attachments_info.append(attachment_info)
                             # 构建文件路径映射
-                            attachment_paths[attachment_info.filename] = attachment_info.file_path
+                            attachment_paths[attachment_info.filename] = (
+                                attachment_info.file_path
+                            )
                             logger.info(f"已加载附件: {attachment_info.filename}")
                         else:
                             logger.warning(f"附件不存在: {attachment_id}")
@@ -647,13 +650,11 @@ class EmailService:
                         datetime.utcnow(),
                         queue_item["id"],
                     )
-                    
+
                     # 邮件发送成功后立即清理附件文件
                     if attachments_info and attachment_paths:
                         await self._cleanup_sent_attachments(
-                            email_request.tenant_id, 
-                            attachments_info, 
-                            attachment_paths
+                            email_request.tenant_id, attachments_info, attachment_paths
                         )
                 else:
                     await conn.execute(
@@ -1165,7 +1166,7 @@ class EmailService:
             if email_request.attachment_ids:
                 attachment_manager = AttachmentManager()
                 attachment_filenames = email_request.attachment_filenames or []
-                
+
                 for i, attachment_id in enumerate(email_request.attachment_ids):
                     try:
                         # 获取附件信息
@@ -1174,7 +1175,10 @@ class EmailService:
                         )
                         if attachment_info:
                             # 如果提供了原始文件名，则使用传递的文件名
-                            if i < len(attachment_filenames) and attachment_filenames[i]:
+                            if (
+                                i < len(attachment_filenames)
+                                and attachment_filenames[i]
+                            ):
                                 original_filename = attachment_filenames[i]
                                 # 创建新的AttachmentInfo使用原始文件名
                                 attachment_info = AttachmentInfo(
@@ -1183,10 +1187,12 @@ class EmailService:
                                     file_size=attachment_info.file_size,
                                     file_path=attachment_info.file_path,
                                 )
-                            
+
                             attachments_info.append(attachment_info)
                             # 构建文件路径映射
-                            attachment_paths[attachment_info.filename] = attachment_info.file_path
+                            attachment_paths[attachment_info.filename] = (
+                                attachment_info.file_path
+                            )
                             logger.info(f"已加载附件: {attachment_info.filename}")
                         else:
                             logger.warning(f"附件不存在: {attachment_id}")
@@ -1308,9 +1314,7 @@ class EmailService:
             # 所有邮件发送完成后清理附件文件（只要有成功发送的就清理）
             if attachments_info and attachment_paths and success_count > 0:
                 await self._cleanup_sent_attachments(
-                    email_request.tenant_id, 
-                    attachments_info, 
-                    attachment_paths
+                    email_request.tenant_id, attachments_info, attachment_paths
                 )
 
             overall_status = (
@@ -1516,14 +1520,14 @@ class EmailService:
             )
 
     async def _cleanup_sent_attachments(
-        self, 
-        tenant_id: str, 
-        attachments_info: List[AttachmentInfo], 
-        attachment_paths: Dict[str, str]
+        self,
+        tenant_id: str,
+        attachments_info: List[AttachmentInfo],
+        attachment_paths: Dict[str, str],
     ) -> None:
         """
         邮件发送成功后清理附件文件
-        
+
         Args:
             tenant_id: 租户ID
             attachments_info: 附件信息列表
@@ -1531,30 +1535,36 @@ class EmailService:
         """
         cleanup_count = 0
         failed_count = 0
-        
+
         try:
             import os
-            
+
             for attachment_info in attachments_info:
                 try:
                     file_path = attachment_paths.get(attachment_info.filename)
                     if not file_path:
                         file_path = attachment_info.file_path
-                    
+
                     if file_path and os.path.exists(file_path):
                         # 删除文件
                         os.remove(file_path)
                         cleanup_count += 1
                         logger.info(f"✅ 已清理附件文件: {attachment_info.filename}")
                     else:
-                        logger.warning(f"⚠️  附件文件不存在，跳过清理: {attachment_info.filename}")
-                        
+                        logger.warning(
+                            f"⚠️  附件文件不存在，跳过清理: {attachment_info.filename}"
+                        )
+
                 except Exception as e:
                     failed_count += 1
-                    logger.error(f"❌ 清理附件文件失败: {attachment_info.filename} - {str(e)}")
-            
+                    logger.error(
+                        f"❌ 清理附件文件失败: {attachment_info.filename} - {str(e)}"
+                    )
+
             if cleanup_count > 0:
-                logger.info(f"🧹 附件清理完成: 成功删除 {cleanup_count} 个文件，失败 {failed_count} 个")
-            
+                logger.info(
+                    f"🧹 附件清理完成: 成功删除 {cleanup_count} 个文件，失败 {failed_count} 个"
+                )
+
         except Exception as e:
             logger.error(f"附件清理过程出错: {str(e)}")

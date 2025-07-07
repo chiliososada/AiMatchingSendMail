@@ -1,45 +1,89 @@
 # app/main.py - asyncpg版本
-from fastapi import FastAPI, Request, HTTPException, Header, Depends
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.security import APIKeyHeader
+import asyncio
 import logging
+import os
+import sys
 import time
 from pathlib import Path
-import os
-import asyncio
 from typing import Optional
 
-from .config import settings
-from .api.email_routes import router as email_router
-from .api.smtp_routes import router as smtp_router
-from .database import db_manager, health_check as db_health_check
-from .api.ai_matching_routes import router as ai_matching_router
-from .api.resume_parser_routes import router as resume_parser_router
-from .api.resume_upload_routes import router as resume_upload_router
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.responses import JSONResponse
+from fastapi.security import APIKeyHeader
+from fastapi.staticfiles import StaticFiles
+
+from app.api.ai_matching_routes import router as ai_matching_router
+from app.api.email_routes import router as email_router
+from app.api.resume_parser_routes import router as resume_parser_router
+from app.api.resume_upload_routes import router as resume_upload_router
+from app.api.smtp_routes import router as smtp_router
+from app.config import settings
+from app.database import db_manager
+from app.database import health_check as db_health_check
+
+
+def get_log_path():
+    if getattr(sys, "frozen", False):
+        # Running in a PyInstaller bundle
+        if len(sys.argv) > 1:
+            return sys.argv[1]
+        else:
+            return "app.log"
+    else:
+        return "app.log"
+
+
+def get_port():
+    if getattr(sys, "frozen", False):
+        # Running in a PyInstaller bundle
+        if len(sys.argv) > 2:
+            return sys.argv[2]
+        else:
+            return 8000
+    else:
+        return 8000
+
+
+def get_upload():
+
+    if getattr(sys, "frozen", False):
+        # Running in a PyInstaller bundle
+        if len(sys.argv) > 3:
+            return Path(sys.argv[3]) / "uploads"
+        else:
+            return Path("uploads")
+    else:
+        return Path("uploads")
 
 
 # 配置日志
 logging.basicConfig(
+    filename=get_log_path(),
+    filemode="w+",
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[logging.FileHandler("app.log"), logging.StreamHandler()],
+    # handlers=[
+    #    logging.FileHandler(get_log_path(), "w"),
+    #    logging.StreamHandler(),
+    # ],
+    force=True,
 )
 logger = logging.getLogger(__name__)
 
 # 创建上传目录
-UPLOAD_DIR = Path("uploads")
+UPLOAD_DIR = get_upload()
 ATTACHMENT_DIR = UPLOAD_DIR / "attachments"
 TEMP_DIR = UPLOAD_DIR / "temp"
 
-for directory in [UPLOAD_DIR, ATTACHMENT_DIR, TEMP_DIR]:
-    directory.mkdir(parents=True, exist_ok=True)
+# for directory in [UPLOAD_DIR, ATTACHMENT_DIR, TEMP_DIR]:
+#    directory.mkdir(parents=True, exist_ok=True)
 
 # 定义API Key认证方案
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
 
 async def get_api_key(api_key: str = Depends(api_key_header)):
     """验证API Key"""
@@ -47,6 +91,7 @@ async def get_api_key(api_key: str = Depends(api_key_header)):
         if not api_key or api_key != settings.API_KEY:
             raise HTTPException(status_code=401, detail="Invalid API Key")
     return api_key
+
 
 # 创建FastAPI应用
 app = FastAPI(
@@ -85,7 +130,7 @@ app = FastAPI(
 # 添加API Key安全方案到OpenAPI schema
 if settings.REQUIRE_API_KEY:
     from fastapi.openapi.utils import get_openapi
-    
+
     def custom_openapi():
         if app.openapi_schema:
             return app.openapi_schema
@@ -96,11 +141,7 @@ if settings.REQUIRE_API_KEY:
             routes=app.routes,
         )
         openapi_schema["components"]["securitySchemes"] = {
-            "ApiKeyAuth": {
-                "type": "apiKey",
-                "in": "header",
-                "name": "X-API-Key"
-            }
+            "ApiKeyAuth": {"type": "apiKey", "in": "header", "name": "X-API-Key"}
         }
         # 为所有API路径添加安全要求（除了排除的路径）
         excluded_paths = ["/", "/health", "/info", "/quick-test"]
@@ -109,11 +150,12 @@ if settings.REQUIRE_API_KEY:
                 for method in path_item:
                     if method in ["get", "post", "put", "delete", "patch"]:
                         path_item[method]["security"] = [{"ApiKeyAuth": []}]
-        
+
         app.openapi_schema = openapi_schema
         return app.openapi_schema
-    
+
     app.openapi = custom_openapi
+
 
 # API Key 认证中间件
 @app.middleware("http")
@@ -122,39 +164,47 @@ async def api_key_middleware(request: Request, call_next):
     # 如果启用了API Key验证
     if settings.REQUIRE_API_KEY:
         # 跳过文档路径和健康检查
-        excluded_paths = ["/docs", "/redoc", "/openapi.json", "/api/v1/openapi.json", "/health", "/", "/info", "/quick-test"]
+        excluded_paths = [
+            "/docs",
+            "/redoc",
+            "/openapi.json",
+            "/api/v1/openapi.json",
+            "/health",
+            "/",
+            "/info",
+            "/quick-test",
+        ]
         # 同时检查路径前缀，处理静态文件和文档相关请求
         excluded_prefixes = ["/docs", "/redoc", "/static"]
-        
-        if (request.url.path in excluded_paths or 
-            any(request.url.path.startswith(prefix) for prefix in excluded_prefixes)):
+
+        if request.url.path in excluded_paths or any(
+            request.url.path.startswith(prefix) for prefix in excluded_prefixes
+        ):
             response = await call_next(request)
             return response
-        
+
         # 从请求头获取API Key
         api_key = request.headers.get("X-API-Key")
-        
+
         if not api_key:
             return JSONResponse(
                 status_code=401,
-                content={"detail": "Missing API Key. Please provide X-API-Key header."}
+                content={"detail": "Missing API Key. Please provide X-API-Key header."},
             )
-        
+
         if api_key != settings.API_KEY:
-            return JSONResponse(
-                status_code=401,
-                content={"detail": "Invalid API Key"}
-            )
-    
+            return JSONResponse(status_code=401, content={"detail": "Invalid API Key"})
+
     response = await call_next(request)
     return response
+
 
 # 添加中间件
 
 # CORS中间件
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.BACKEND_CORS_ORIGINS,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*", "X-API-Key"],
@@ -385,8 +435,8 @@ async def health_check():
 @app.get("/info", tags=["系统"])
 async def system_info():
     """系统信息"""
-    import sys
     import platform
+    import sys
 
     return {
         "application": {
@@ -473,6 +523,8 @@ async def quick_test():
 # 启动和关闭事件
 @app.on_event("startup")
 async def startup_event():
+
+    logger.info(f"pid: {os.getpid()}")
     """应用启动时执行"""
     logger.info("邮件API服务启动...")
     logger.info("数据库类型: asyncpg连接池")
@@ -482,9 +534,9 @@ async def startup_event():
     logger.info("兼容性: 与aimachingmail项目完全兼容")
 
     # 确保必要的目录存在
-    for directory in [ATTACHMENT_DIR, TEMP_DIR]:
-        directory.mkdir(parents=True, exist_ok=True)
-        logger.info(f"确保目录存在: {directory}")
+    # for directory in [ATTACHMENT_DIR, TEMP_DIR]:
+    #    directory.mkdir(parents=True, exist_ok=True)
+    #    logger.info(f"确保目录存在: {directory}")
 
     # 初始化数据库连接池
     try:
@@ -541,12 +593,16 @@ async def shutdown_event():
 if __name__ == "__main__":
     import uvicorn
 
+    print(sys.argv)
+
+    print(f"port:{get_port()}")
+    print(f"upload dir: {UPLOAD_DIR}")
     # 开发环境配置
     uvicorn.run(
         "app.main:app",
         host="0.0.0.0",
-        port=8000,
-        reload=True,
+        port=get_port(),
+        reload=False,
         reload_dirs=["app"],
         log_level="info",
         access_log=True,

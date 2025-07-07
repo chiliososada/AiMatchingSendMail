@@ -1,25 +1,26 @@
 # app/api/resume_parser_routes.py
-from fastapi import APIRouter, HTTPException, status, UploadFile, File, Form
-from fastapi.responses import JSONResponse
+import asyncio
+import logging
+import os
+import re
+import time
+from pathlib import Path
 from typing import List, Optional
 from uuid import UUID, uuid4
-import logging
-from pathlib import Path
-import aiofiles
-import os
-import asyncio
-import time
-import pandas as pd
-import re
 
-from ..services.resume_parser_service import ResumeParserService
+import aiofiles
+import pandas as pd
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
+from fastapi.responses import JSONResponse
+
+from ..config import settings
 from ..schemas.resume_parser_schemas import (
-    ResumeParseRequest,
-    ResumeParseResponse,
     BatchResumeParseRequest,
     BatchResumeParseResponse,
+    ResumeParseRequest,
+    ResumeParseResponse,
 )
-from ..config import settings
+from ..services.resume_parser_service import ResumeParserService
 from ..utils.text_utils import dataframe_to_text
 
 logger = logging.getLogger(__name__)
@@ -27,7 +28,7 @@ router = APIRouter()
 
 # 创建临时文件目录
 TEMP_DIR = Path("uploads/temp/resumes")
-TEMP_DIR.mkdir(parents=True, exist_ok=True)
+# TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
 # 创建解析服务实例
 resume_parser_service = ResumeParserService()
