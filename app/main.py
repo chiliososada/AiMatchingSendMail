@@ -42,7 +42,7 @@ def get_port():
     if getattr(sys, "frozen", False):
         # Running in a PyInstaller bundle
         if len(sys.argv) > 2:
-            return sys.argv[2]
+            return int(sys.argv[2])
         else:
             return 8000
     else:
