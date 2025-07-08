@@ -72,7 +72,7 @@ def get_encryption_key() -> bytes:
             if len(settings.ENCRYPTION_KEY) == 44 and settings.ENCRYPTION_KEY.endswith(
                 "="
             ):
-                return base64.urlsafe_b64decode(settings.ENCRYPTION_KEY.encode())
+                return settings.ENCRYPTION_KEY.encode()
             else:
                 # 如果是普通字符串，使用与aimachingmail一致的简单SHA256派生
                 return _derive_key(settings.ENCRYPTION_KEY)
@@ -213,7 +213,7 @@ class SMTPPasswordManager:
         try:
             # 如果是base64编码的密钥
             if len(self.encryption_key) == 44 and self.encryption_key.endswith("="):
-                return base64.urlsafe_b64decode(self.encryption_key.encode())
+                return self.encryption_key.encode()
             else:
                 # 使用与aimachingmail一致的简单SHA256派生
                 return _derive_key(self.encryption_key)
