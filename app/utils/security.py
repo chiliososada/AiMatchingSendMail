@@ -121,9 +121,19 @@ def decrypt_password(encrypted_password: str) -> str:
 
         # 处理不同格式的输入
         if isinstance(encrypted_password, str):
-            # 如果是字符串，尝试base64解码
+            # 如果是字符串，尝试base64解码 - 支持双重编码
             try:
-                encrypted_bytes = base64.urlsafe_b64decode(encrypted_password.encode())
+                # 第一次base64解码
+                first_decode = base64.urlsafe_b64decode(encrypted_password.encode())
+                
+                # 检查是否是双重base64编码（第一次解码结果是字符串格式的Fernet token）
+                if first_decode.startswith(b'gAAAAA'):
+                    # 这是一个Fernet token的bytes，直接使用
+                    encrypted_bytes = first_decode
+                else:
+                    # 这已经是加密的字节数据
+                    encrypted_bytes = first_decode
+                    
             except:
                 # 如果解码失败，可能是hex格式或其他格式
                 if encrypted_password.startswith("\\x"):
@@ -258,11 +268,21 @@ class SMTPPasswordManager:
                         logger.error(f"Failed to convert hex string to bytes: {ve}")
                         raise Exception(f"无效的hex格式: {encrypted_password}")
                 else:
-                    # 尝试base64解码
+                    # 尝试base64解码 - 支持双重编码
                     try:
-                        encrypted_bytes = base64.urlsafe_b64decode(
+                        # 第一次base64解码
+                        first_decode = base64.urlsafe_b64decode(
                             encrypted_password.encode()
                         )
+                        
+                        # 检查是否是双重base64编码（第一次解码结果是字符串格式的Fernet token）
+                        if first_decode.startswith(b'gAAAAA'):
+                            # 这是一个Fernet token的bytes，直接使用
+                            encrypted_bytes = first_decode
+                        else:
+                            # 这已经是加密的字节数据
+                            encrypted_bytes = first_decode
+                            
                     except Exception:
                         # 如果base64解码失败，尝试当作hex处理
                         try:
