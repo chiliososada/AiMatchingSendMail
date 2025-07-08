@@ -25,15 +25,17 @@ from app.database import db_manager
 from app.database import health_check as db_health_check
 
 
+os.environ["PYTHONUTF8"] = "1"
+
 def get_log_path():
     if getattr(sys, "frozen", False):
         # Running in a PyInstaller bundle
-        if len(sys.argv) > 1:
-            return sys.argv[1]
+        if len(sys.argv) > 3:
+            return Path(sys.argv[3])/"backend.log"
         else:
-            return "app.log"
+            return Path("backend.log")
     else:
-        return "app.log"
+        return Path("backend.log")
 
 
 def get_port():

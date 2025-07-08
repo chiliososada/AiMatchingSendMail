@@ -549,13 +549,13 @@ try:
         TEMP_DIR=str(get_upload() / "temp"),
         TEMPLATE_DIR=str(get_upload() / "template"),
     )
-    print("✅ 配置加载成功")
-    print(f"🗄️  数据库类型: asyncpg连接池")
-    print(f"🔗 数据库URL: {settings.get_database_url(hide_password=True)}")
-    print(f"🏊 连接池配置: {settings.ASYNCPG_MIN_SIZE}-{settings.ASYNCPG_MAX_SIZE}")
+    #print("✅ 配置加载成功")
+    #print(f"🗄️  数据库类型: asyncpg连接池")
+    #print(f"🔗 数据库URL: {settings.get_database_url(hide_password=True)}")
+    #print(f"🏊 连接池配置: {settings.ASYNCPG_MIN_SIZE}-{settings.ASYNCPG_MAX_SIZE}")
 except Exception as e:
-    print(f"❌ 配置加载失败: {str(e)}")
-    print("使用默认配置启动...")
+    #print(f"❌ 配置加载失败: {str(e)}")
+    #print("使用默认配置启动...")
     settings = Settings(
         DATABASE_URL="postgresql://emailapi:emailapi123@localhost:5432/email_api_db",
         SECRET_KEY="development-secret-key",
@@ -568,40 +568,40 @@ if settings.VALIDATE_CONFIG_ON_STARTUP:
     if validation_errors:
         import sys
 
-        print("⚠️  配置验证警告:")
+        #print("⚠️  配置验证警告:")
         for error in validation_errors:
             print(f"  - {error}")
         if settings.is_production():
-            print("🚫 生产环境中检测到配置错误，退出...")
+            #print("🚫 生产环境中检测到配置错误，退出...")
             sys.exit(1)
 
 # 创建必要的目录
 try:
     settings.create_directories()
-    print(f"📁 目录创建成功: {settings.attachment_path}")
+    #print(f"📁 目录创建成功: {settings.attachment_path}")
 except Exception as e:
-    print(f"❌ 创建目录失败: {str(e)}")
+    print(f"{str(e)}")
 
 # 环境特定配置
 if settings.is_development():
     settings.DATABASE_ECHO = True
     settings.DEBUG = True
     settings.QUERY_LOGGING_ENABLED = True
-    print("🔧 开发环境配置已应用（包含查询日志）")
+    #print("🔧 开发环境配置已应用（包含查询日志）")
 
 if settings.is_production():
     settings.DATABASE_ECHO = False
     settings.DEBUG = False
     settings.QUERY_LOGGING_ENABLED = False
-    print("🔒 生产环境配置已应用")
+    #print("🔒 生产环境配置已应用")
 
 # asyncpg特定检查
 try:
     import asyncpg
 
-    print("✅ asyncpg已安装")
+    #print("✅ asyncpg已安装")
 except ImportError:
-    print("❌ 需要安装asyncpg: pip install asyncpg")
+    print("pip install asyncpg")
 
 # 导出
 __all__ = ["settings", "Settings"]

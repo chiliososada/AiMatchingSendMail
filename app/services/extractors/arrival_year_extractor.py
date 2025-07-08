@@ -37,9 +37,9 @@ try:
         ARRIVAL_KEYWORDS.extend(KEYWORDS["arrival"])
         ARRIVAL_KEYWORDS = list(set(ARRIVAL_KEYWORDS))  # 去重
 
-    print("✅ 成功导入项目关键词，已合并")
+    #print("✅ 成功导入项目关键词，已合并")
 except ImportError as e:
-    print(f"⚠️  项目关键词导入失败，使用备用关键词: {e}")
+    #print(f"⚠️  项目关键词导入失败，使用备用关键词: {e}")
 
     # 备用基类
     class BaseExtractor:
@@ -61,52 +61,54 @@ class ArrivalYearExtractor(BaseExtractor):
         Returns:
             来日年份字符串，如果未找到返回None
         """
-        print("\n" + "=" * 60)
-        print("🔍 开始来日年份提取器执行流程 (修复版)")
-        print("=" * 60)
+        #print("\n" + "=" * 60)
+        #print("🔍 开始来日年份提取器执行流程 (修复版)")
+        #print("=" * 60)
 
-        print(f"\n📋 使用关键词: {ARRIVAL_KEYWORDS}")
+        #print(f"\n📋 使用关键词: {ARRIVAL_KEYWORDS}")
 
         # 处理出生年份
         birth_year = None
         if birthdate_result:
             try:
                 birth_year = datetime.strptime(birthdate_result, "%Y-%m-%d").year
-                print(f"✅ 解析出生年份: {birth_year} (将排除此年份)")
+                #print(f"✅ 解析出生年份: {birth_year} (将排除此年份)")
             except Exception as e:
-                print(f"⚠️  生年月日解析失败: {e}")
+                print(f"{e}")
 
         candidates = []
 
-        print(f"\n📋 开始处理 {len(all_data)} 个数据表")
+        #print(f"\n📋 开始处理 {len(all_data)} 个数据表")
 
         for sheet_idx, data in enumerate(all_data):
             df = data["df"]
             sheet_name = data.get("sheet_name", f"Sheet_{sheet_idx}")
 
-            print(f"\n📊 处理数据表 {sheet_idx+1}/{len(all_data)}: '{sheet_name}'")
-            print(f"   表格大小: {len(df)} 行 x {len(df.columns)} 列")
+            #print(f"\n📊 处理数据表 {sheet_idx+1}/{len(all_data)}: '{sheet_name}'")
+            #print(f"   表格大小: {len(df)} 行 x {len(df.columns)} 列")
 
             # 🔥 修复2: 优化关键词匹配逻辑
             sheet_candidates = self._extract_from_sheet(df, birth_year)
             if sheet_candidates:
                 candidates.extend(sheet_candidates)
-                print(f"   ✅ 本表提取到 {len(sheet_candidates)} 个候选年份")
+                #print(f"   ✅ 本表提取到 {len(sheet_candidates)} 个候选年份")
             else:
-                print(f"   ❌ 本表未找到有效年份")
+                
+                continue
+                #print(f"   ❌ 本表未找到有效年份")
 
         if not candidates:
-            print(f"\n❌ 所有表格都未找到来日年份")
+            #print(f"\n❌ 所有表格都未找到来日年份")
             return None
 
         # 选择最佳候选
         best_candidate = self._select_best_candidate(candidates, birth_year)
 
         if best_candidate:
-            print(f"\n🎯 最终选择: {best_candidate}")
+            #print(f"\n🎯 最终选择: {best_candidate}")
             return best_candidate
         else:
-            print(f"\n❌ 未找到合适的来日年份")
+            #print(f"\n❌ 未找到合适的来日年份")
             return None
 
     def _extract_from_sheet(
@@ -115,7 +117,7 @@ class ArrivalYearExtractor(BaseExtractor):
         """从单个表格提取来日年份候选"""
         candidates = []
 
-        print(f"      🔍 开始扫描表格...")
+        #print(f"      🔍 开始扫描表格...")
 
         # 🔥 修复3: 遍历所有单元格，寻找关键词和年份
         for idx in range(min(50, len(df))):  # 前50行通常包含基本信息
@@ -138,9 +140,9 @@ class ArrivalYearExtractor(BaseExtractor):
                         )
                         if nearby_years:
                             candidates.extend(nearby_years)
-                            print(
-                                f"            ✅ 找到附近年份: {[y[0] for y in nearby_years]}"
-                            )
+                            #print(
+                            #    f"            ✅ 找到附近年份: {[y[0] for y in nearby_years]}"
+                            #)
 
                     # 🔥 修复5: 直接检查单元格是否包含年份格式
                     year_matches = self._extract_year_from_cell(cell_str, birth_year)
@@ -148,9 +150,9 @@ class ArrivalYearExtractor(BaseExtractor):
                         # 检查这个单元格是否在来日相关的行
                         if self._is_arrival_related_row(df, idx):
                             candidates.extend(year_matches)
-                            print(
-                                f"         📅 行{idx+1}列{col+1}: 直接提取年份 {[y[0] for y in year_matches]} 从 '{cell_str}'"
-                            )
+                            #print(
+                            #    f"         📅 行{idx+1}列{col+1}: 直接提取年份 {[y[0] for y in year_matches]} 从 '{cell_str}'"
+                            #)
 
         return candidates
 
@@ -214,9 +216,9 @@ class ArrivalYearExtractor(BaseExtractor):
                 # 🔥 修复7: 年份合理性检查
                 if self._is_valid_arrival_year(year, birth_year):
                     candidates.append((year_str, confidence))
-                    print(
-                        f"            📅 提取年份: {year_str} (模式: {pattern}, 置信度: {confidence})"
-                    )
+                    #print(
+                    #    f"            📅 提取年份: {year_str} (模式: {pattern}, 置信度: {confidence})"
+                    #)
 
         return candidates
 
@@ -228,14 +230,14 @@ class ArrivalYearExtractor(BaseExtractor):
 
         # 排除出生年份
         if birth_year and year == birth_year:
-            print(f"            ⚠️  排除出生年份: {year}")
+            #print(f"            ⚠️  排除出生年份: {year}")
             return False
 
         # 来日年份应该在一个合理的范围内
         if birth_year:
             # 来日年份应该在出生后至少10年，最多50年内
             if year < birth_year + 10 or year > birth_year + 50:
-                print(f"            ⚠️  年份不合理: {year} (出生年份: {birth_year})")
+                #print(f"            ⚠️  年份不合理: {year} (出生年份: {birth_year})")
                 return False
 
         return True
@@ -259,14 +261,15 @@ class ArrivalYearExtractor(BaseExtractor):
         if not candidates:
             return None
 
-        print(f"\n📊 候选年份分析:")
+        #print(f"\n📊 候选年份分析:")
 
         # 按置信度排序
         sorted_candidates = sorted(candidates, key=lambda x: x[1], reverse=True)
 
         # 显示所有候选
         for year, confidence in sorted_candidates[:5]:  # 显示前5个
-            print(f"   {year}: 置信度 {confidence:.2f}")
+            #print(f"   {year}: 置信度 {confidence:.2f}")
+            continue
 
         # 选择置信度最高的
         best_year, best_confidence = sorted_candidates[0]
@@ -274,5 +277,5 @@ class ArrivalYearExtractor(BaseExtractor):
         if best_confidence >= 2.0:  # 置信度阈值
             return str(best_year)
         else:
-            print(f"   ⚠️  最高置信度 {best_confidence} 低于阈值 2.0")
+            #print(f"   ⚠️  最高置信度 {best_confidence} 低于阈值 2.0")
             return None
